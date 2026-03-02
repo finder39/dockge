@@ -64,10 +64,43 @@
                 </button>
             </div>
         </form>
+
+        <!-- Scheduler Settings -->
+        <h4 class="mt-5 mb-3">{{ $t("schedulerSettings") }}</h4>
+        <div class="shadow-box big-padding mb-4">
+            <div class="mb-3">
+                <BFormCheckbox v-model="scheduler.enabled" switch @change="saveScheduler">
+                    {{ $t("enableAutoUpdateScheduler") }}
+                </BFormCheckbox>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">{{ $t("cronExpression") }}</label>
+                <input v-model="scheduler.cronExpression" type="text" class="form-control" placeholder="0 3 * * *" :disabled="!scheduler.enabled">
+                <div class="form-text">{{ $t("cronHelp") }}</div>
+            </div>
+
+            <div class="mb-3">
+                <BFormCheckbox v-model="scheduler.pruneAfterUpdate" switch :disabled="!scheduler.enabled">
+                    {{ $t("pruneAfterUpdate") }}
+                </BFormCheckbox>
+            </div>
+
+            <div class="mb-3" style="margin-left: 2.5rem;">
+                <BFormCheckbox v-model="scheduler.pruneAllAfterUpdate" switch :disabled="!scheduler.enabled || !scheduler.pruneAfterUpdate">
+                    {{ $t("pruneAllAfterUpdate") }}
+                </BFormCheckbox>
+            </div>
+
+            <button class="btn btn-primary" :disabled="!scheduler.enabled" @click="saveScheduler">
+                {{ $t("Save") }}
+            </button>
+        </div>
+
     </div>
 </template>
 
-<script>
+<script lang="ts">
 
 import dayjs from "dayjs";
 import { timezoneList } from "../../util-frontend";
@@ -80,6 +113,12 @@ export default {
     data() {
         return {
             timezoneList: timezoneList(),
+            scheduler: {
+                enabled: false,
+                cronExpression: "0 3 * * *",
+                pruneAfterUpdate: false,
+                pruneAllAfterUpdate: false,
+            },
         };
     },
 
@@ -95,7 +134,11 @@ export default {
         },
         guessTimezone() {
             return dayjs.tz.guess();
-        }
+        },
+    },
+
+    mounted() {
+        this.loadSchedulerSettings();
     },
 
     methods: {
@@ -108,6 +151,21 @@ export default {
         autoGetPrimaryHostname() {
             this.settings.primaryHostname = location.hostname;
         },
+
+        loadSchedulerSettings() {
+            this.$root.getSocket().emit("getSchedulerSettings", (res) => {
+                if (res.ok) {
+                    this.scheduler = res.data;
+                }
+            });
+        },
+
+        saveScheduler() {
+            this.$root.getSocket().emit("setSchedulerSettings", this.scheduler, (res) => {
+                this.$root.toastRes(res);
+            });
+        },
+
     },
 };
 </script>

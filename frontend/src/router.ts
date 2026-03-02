@@ -19,6 +19,7 @@ import General from "./components/settings/General.vue";
 const Security = () => import("./components/settings/Security.vue");
 import About from "./components/settings/About.vue";
 import MobileStackList from "./pages/MobileStackList.vue";
+import UpdateHistory from "./pages/UpdateHistory.vue";
 
 const routes = [
     {
@@ -89,6 +90,10 @@ const routes = [
                     {
                         path: "/stacks",
                         component: MobileStackList,
+                    },
+                    {
+                        path: "/update-history",
+                        component: UpdateHistory,
                     },
                     {
                         path: "/console",

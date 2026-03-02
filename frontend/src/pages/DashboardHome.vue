@@ -1,4 +1,4 @@
-stackStatusList<template>
+<template>
     <transition ref="tableContainer" name="slide-fade" appear>
         <div v-if="$route.name === 'DashboardHome'">
             <h1 class="mb-3">
@@ -41,16 +41,21 @@ stackStatusList<template>
                                     <font-awesome-icon v-if="endpoint !== ''" class="ms-3 action-icon" icon="trash" @click="showRemoveAgentDialog[agent.endpoint] = !showRemoveAgentDialog[agent.endpoint]" />
                                 </div>
 
-                                <router-link v-if="agentStatusList[endpoint] === 'online'" class="btn btn-sm btn-normal" data-toggle="tooltip" :title="$t('tooltipAgentMaintenance')" :to="getAgentRouteLink(agent)">
-                                    <font-awesome-icon icon="wrench" class="me-2" />{{ $t("maintenance") }}
-                                </router-link>
+                                <div class="d-flex gap-2">
+                                    <button v-if="agentStatusList[endpoint] === 'online'" class="btn btn-sm btn-info" :disabled="updatingAll[endpoint]" @click="updateAllStacks(endpoint)">
+                                        <font-awesome-icon icon="cloud-arrow-down" class="me-1" />{{ updatingAll[endpoint] ? $t("updating") : $t("updateAll") }}
+                                    </button>
+                                    <router-link v-if="agentStatusList[endpoint] === 'online'" class="btn btn-sm btn-normal" data-toggle="tooltip" :title="$t('tooltipAgentMaintenance')" :to="getAgentRouteLink(agent)">
+                                        <font-awesome-icon icon="wrench" class="me-2" />{{ $t("maintenance") }}
+                                    </router-link>
+                                </div>
                             </div>
 
                             <div class="mb-3">
                                 <span class="url">{{ !!agent.url ? agent.url : "local" }}</span>
                             </div>
 
-                            <div class="d-flex flex-wrap gap-3">
+                            <div class="d-flex flex-wrap gap-3 align-items-center">
                                 <!-- Agent Status -->
                                 <template v-if="agentStatusList[endpoint]">
                                     <span v-if="agentStatusList[endpoint] === 'online'" class="badge bg-primary me-2">{{ $t("agentOnline") }}</span>
@@ -64,6 +69,22 @@ stackStatusList<template>
                                         </template>
                                     </template>
                                 </template>
+                            </div>
+
+                            <!-- Server Status -->
+                            <div v-if="schedulerData" class="status-row mt-3">
+                                <span class="status-item">
+                                    <span class="status-label">{{ $t("updatesAvailable") }}:</span>
+                                    <span :class="{ 'text-warning': getUpdatesAvailableCount(endpoint) > 0 }">{{ getUpdatesAvailableCount(endpoint) }}</span>
+                                </span>
+                                <span class="status-item">
+                                    <span class="status-label">{{ $t("nextImageCheck") }}:</span>
+                                    {{ schedulerData.nextImageCheck ? formatDate(schedulerData.nextImageCheck) : $t("noDataYet") }}
+                                </span>
+                                <span class="status-item">
+                                    <span class="status-label">{{ $t("nextAutoUpdate") }}:</span>
+                                    {{ schedulerData.enabled ? (schedulerData.nextAutoUpdate ? formatDate(schedulerData.nextAutoUpdate) : $t("noDataYet")) : $t("schedulerDisabled") }}
+                                </span>
                             </div>
 
                             <!-- Edit Dialog -->
@@ -123,6 +144,7 @@ stackStatusList<template>
 
 <script lang="ts">
 import { defineComponent } from "vue";
+import dayjs from "dayjs";
 import { AgentData, SimpleStackData } from "../../../common/types";
 import { StackFilter, StackStatusInfo } from "../../../common/util-common";
 
@@ -149,7 +171,9 @@ export default defineComponent({
             showEditAgentNameDialog: {},
             editAgentNewName: {},
             connectingAgent: false,
-            newAgent: {}
+            updatingAll: {} as Record<string, boolean>,
+            newAgent: {},
+            schedulerData: null as { enabled: boolean; nextAutoUpdate: string | null; nextImageCheck: string | null } | null,
         };
     },
 
@@ -212,6 +236,7 @@ export default defineComponent({
         this.updatePerPage();
 
         this.resetNewAgent();
+        this.loadSchedulerData();
     },
 
     beforeUnmount() {
@@ -219,6 +244,24 @@ export default defineComponent({
     },
 
     methods: {
+
+        loadSchedulerData() {
+            this.$root.getSocket().emit("getSchedulerSettings", (res) => {
+                if (res.ok) {
+                    this.schedulerData = res.data;
+                }
+            });
+        },
+
+        getUpdatesAvailableCount(endpoint: string): number {
+            return Object.values(this.stackList).filter(
+                (s: SimpleStackData) => s.endpoint === endpoint && s.imageUpdatesAvailable
+            ).length;
+        },
+
+        formatDate(isoString: string): string {
+            return dayjs(isoString).format("MMM D h:mm A");
+        },
 
         getInfoStyle(info: StackStatusInfo) {
             return `color: var(--dockge-${info.textColor}-color);`;
@@ -308,6 +351,36 @@ export default defineComponent({
                     };
                 }
             });
+        },
+
+        updateAllStacks(endpoint: string) {
+            this.updatingAll[endpoint] = true;
+
+            // Get all stacks for this endpoint and update them sequentially
+            const stacksForEndpoint = Object.values(this.stackList).filter(
+                (s: SimpleStackData) => s.endpoint === endpoint && s.isManagedByDockge
+            );
+
+            let completed = 0;
+            const total = stacksForEndpoint.length;
+
+            if (total === 0) {
+                this.updatingAll[endpoint] = false;
+                return;
+            }
+
+            for (const stack of stacksForEndpoint) {
+                this.$root.emitAgent(endpoint, "updateStack", stack.name, false, false, (res) => {
+                    completed++;
+                    if (!res.ok) {
+                        this.$root.toastError(`Failed to update ${stack.name}`);
+                    }
+                    if (completed >= total) {
+                        this.updatingAll[endpoint] = false;
+                        this.$root.toastRes({ ok: true, msg: "All stacks updated" });
+                    }
+                });
+            }
         },
 
         convertDockerRun() {
@@ -429,6 +502,20 @@ table {
     border: none;
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
+}
+
+.status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: #adb5bd;
+}
+
+.status-item {
+    .status-label {
+        color: #6c757d;
+    }
 }
 
 .action-icon {

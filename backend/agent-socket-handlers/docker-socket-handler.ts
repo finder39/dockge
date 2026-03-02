@@ -3,6 +3,7 @@ import { DockgeServer } from "../dockge-server";
 import { callbackError, callbackResult, checkLogin, DockgeSocket, ValidationError } from "../util-server";
 import { Stack } from "../stack";
 import { AgentSocket } from "../../common/agent-socket";
+import { UpdateHistoryService } from "../update-history-service";
 
 export class DockerSocketHandler extends AgentSocketHandler {
     create(socket : DockgeSocket, server : DockgeServer, agentSocket : AgentSocket) {
@@ -105,6 +106,24 @@ export class DockerSocketHandler extends AgentSocketHandler {
             }
         });
 
+        // getStackList - returns stack data directly as callback (for REST API proxy)
+        agentSocket.on("getStackList", async (callback) => {
+            try {
+                checkLogin(socket);
+                const stackList = await Stack.getStackList(server, true);
+                const stacks: Record<string, object> = {};
+                for (const [name, stack] of stackList) {
+                    stacks[name] = stack.getSimpleData(socket.endpoint);
+                }
+                callbackResult({
+                    ok: true,
+                    stackList: stacks,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
         // startStack
         agentSocket.on("startStack", async (stackName : unknown, callback) => {
             try {
@@ -191,8 +210,34 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("pruneAllAfterUpdate must be a boolean");
                 }
 
+                const startedAt = new Date().toISOString();
+                const startTime = Date.now();
+                let success = true;
+                let errorMessage: string | null = null;
+
                 const stack = await Stack.getStack(server, stackName);
-                await stack.update(socket, pruneAfterUpdate, pruneAllAfterUpdate);
+                try {
+                    await stack.update(socket, pruneAfterUpdate, pruneAllAfterUpdate);
+                } catch (e) {
+                    success = false;
+                    errorMessage = e instanceof Error ? e.message : String(e);
+                    throw e;
+                } finally {
+                    const completedAt = new Date().toISOString();
+                    const durationMs = Date.now() - startTime;
+                    await UpdateHistoryService.recordUpdate(
+                        stackName,
+                        socket.endpoint || "",
+                        "manual",
+                        success,
+                        null,
+                        errorMessage,
+                        startedAt,
+                        completedAt,
+                        durationMs
+                    );
+                }
+
                 callbackResult({
                     ok: true,
                     msg: "Updated",

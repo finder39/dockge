@@ -5,6 +5,7 @@
             <span class="me-2">{{ stack.name }}</span>
             <font-awesome-icon v-if="stack.started && stack.recreateNecessary" icon="rocket" class="notification-icon me-2" />
             <font-awesome-icon v-if="stack.started && stack.imageUpdatesAvailable" icon="arrow-up" class="notification-icon me-2" />
+            <font-awesome-icon v-if="stack.autoUpdate" icon="clock" class="auto-update-icon me-2" :title="$t('autoUpdate')" />
             <div v-if="agentCount > 1" class="endpoint">{{ endpointDisplay }}</div>
         </div>
     </router-link>
@@ -184,6 +185,11 @@ export default defineComponent({
 .notification-icon {
     color: $info;
     font-weight: bold;
+}
+
+.auto-update-icon {
+    color: $dark-font-color3;
+    font-size: 0.8em;
 }
 
 </style>

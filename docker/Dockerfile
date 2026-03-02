@@ -4,6 +4,17 @@
 FROM louislam/dockge:build-healthcheck AS build_healthcheck
 
 ############################################
+# Build Frontend
+############################################
+FROM louislam/dockge:base AS build-frontend
+WORKDIR /app
+COPY --chown=node:node  ./package.json ./package.json
+COPY --chown=node:node  ./package-lock.json ./package-lock.json
+RUN npm ci
+COPY --chown=node:node  . .
+RUN npm run build:frontend
+
+############################################
 # Build
 ############################################
 FROM louislam/dockge:base AS build
@@ -16,9 +27,12 @@ RUN npm ci --omit=dev
 # ⭐ Main Image
 ############################################
 FROM louislam/dockge:base AS release
+# Install skopeo for remote image digest checks (not in upstream base image)
+RUN apt-get update && apt-get install --yes --no-install-recommends skopeo && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --chown=node:node --from=build_healthcheck /app/extra/healthcheck /app/extra/healthcheck
 COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build-frontend /app/frontend-dist /app/frontend-dist
 COPY --chown=node:node  . .
 RUN mkdir ./data
 

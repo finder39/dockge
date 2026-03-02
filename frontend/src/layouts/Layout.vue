@@ -45,6 +45,13 @@
                     </router-link>
                 </li>
 
+                <li v-if="$root.loggedIn" class="nav-item me-2" data-toggle="tooltip" :title="$t('updateHistory')">
+                    <router-link to="/update-history" class="nav-link d-flex flex-column flex-sm-row align-items-center">
+                        <font-awesome-icon icon="clock-rotate-left" />
+                        <div class="mt-2 mt-sm-0 ms-sm-2">{{ $t("updateHistory") }}</div>
+                    </router-link>
+                </li>
+
                 <li v-if="$root.loggedIn" class="nav-item">
                     <div class="dropdown dropdown-profile-pic">
                         <div class="nav-link" data-bs-toggle="dropdown">

@@ -36,6 +36,12 @@
                         <span class="d-none d-xl-inline">{{ $t("restartStack") }}</span>
                     </button>
 
+                    <button v-if="!isEditMode" class="btn btn-normal me-1" data-toggle="tooltip" :title="$t('tooltipCheckUpdates')" :disabled="processing || checkingUpdates" @click="checkStackUpdates">
+                        <font-awesome-icon v-if="checkingUpdates" icon="spinner" spin class="me-1" />
+                        <font-awesome-icon v-else icon="magnifying-glass" class="me-1" />
+                        <span class="d-none d-xl-inline">{{ $t("checkUpdates") }}</span>
+                    </button>
+
                     <button v-if="!isEditMode" class="btn me-1" data-toggle="tooltip" :title="$t('tooltipStackUpdate')" :class="stack.imageUpdatesAvailable ? 'btn-info' : 'btn-normal'" :disabled="processing" @click="showUpdateDialog = true">
                         <font-awesome-icon icon="cloud-arrow-down" class="me-1" />
                         <span class="d-none d-xl-inline">{{ $t("updateStack") }}</span>
@@ -76,6 +82,18 @@
                 </BButtonGroup>
 
                 <button v-if="isEditMode && !isAdd" class="btn btn-normal" data-toggle="tooltip" :title="$t('tooltipStackDiscard')" :disabled="processing" @click="discardStack">{{ $t("discardStack") }}</button>
+
+                <BFormCheckbox v-if="!isEditMode && !isAdd" v-model="autoUpdate" switch class="d-inline-block ms-3" @change="toggleAutoUpdate">
+                    <font-awesome-icon icon="clock" class="me-1" />
+                    {{ $t("autoUpdate") }}
+                </BFormCheckbox>
+            </div>
+
+            <!-- Stack Update Status -->
+            <div v-if="!isEditMode && !isAdd && stack.imageUpdatesAvailable" class="mb-3">
+                <span class="badge bg-info me-2">
+                    <font-awesome-icon icon="cloud-arrow-down" class="me-1" />{{ $t("imageUpdatesAvailable") }}
+                </span>
             </div>
 
             <!-- URLs -->
@@ -328,6 +346,7 @@ export default defineComponent({
             composeDocument: new ComposeDocument(),
             yamlError: "",
             processing: false,
+            checkingUpdates: false,
             combinedTerminalRows: COMBINED_TERMINAL_ROWS,
             combinedTerminalCols: COMBINED_TERMINAL_COLS,
             stack: {},
@@ -336,6 +355,7 @@ export default defineComponent({
             showDeleteDialog: false,
             newContainerName: "",
             stopUpdateTimeouts: false,
+            autoUpdate: false,
             showUpdateDialog: false,
             updateDialogData: {
                 pruneAfterUpdate: false,
@@ -615,6 +635,7 @@ export default defineComponent({
             this.$root.emitAgent(this.endpoint, "getStack", this.stack.name, (res) => {
                 if (res.ok) {
                     this.stack = res.stack;
+                    this.autoUpdate = !!res.stack.autoUpdate;
                     this.yamlCodeChange();
                     this.processing = false;
                 } else {
@@ -820,6 +841,24 @@ export default defineComponent({
             element.scrollIntoView({
                 block: "start",
                 behavior: "smooth"
+            });
+        },
+
+        checkStackUpdates() {
+            this.checkingUpdates = true;
+            this.$root.getSocket().emit("checkStackUpdates", this.stack.name, this.endpoint, (res) => {
+                this.checkingUpdates = false;
+                if (res.ok) {
+                    this.$root.toastRes(res);
+                } else {
+                    this.$root.toastRes(res);
+                }
+            });
+        },
+
+        toggleAutoUpdate() {
+            this.$root.getSocket().emit("setAutoUpdate", this.stack.name, this.endpoint, this.autoUpdate, (res) => {
+                this.$root.toastRes(res);
             });
         },
 

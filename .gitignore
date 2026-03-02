@@ -10,3 +10,10 @@ tmp
 # Git only
 frontend-dist
 
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Logs
+logs/
+

@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { MainRouter } from "./routers/main-router";
+import { ApiRouter } from "./routers/api-router";
 import * as fs from "node:fs";
 import { PackageJson } from "type-fest";
 import { Database } from "./database";
@@ -36,8 +37,10 @@ import { AgentProxySocketHandler } from "./socket-handlers/agent-proxy-socket-ha
 import { AgentSocketHandler } from "./agent-socket-handler";
 import { AgentSocket } from "../common/agent-socket";
 import { ManageAgentSocketHandler } from "./socket-handlers/manage-agent-socket-handler";
+import { UpdateManagementSocketHandler } from "./socket-handlers/update-management-socket-handler";
 import { Terminal } from "./terminal";
 import { AgentMaintenanceSocketHandler } from "./agent-socket-handlers/agent-maintenance-socket-handler";
+import { AutoUpdateScheduler } from "./auto-update-scheduler";
 
 export class DockgeServer {
     app : Express;
@@ -51,6 +54,7 @@ export class DockgeServer {
      * List of express routers
      */
     routerList : Router[] = [
+        new ApiRouter(),
         new MainRouter(),
     ];
 
@@ -59,10 +63,27 @@ export class DockgeServer {
      */
     socketHandlerList : SocketHandler[] = [
         new MainSocketHandler(),
-        new ManageAgentSocketHandler()
+        new ManageAgentSocketHandler(),
+        new UpdateManagementSocketHandler()
     ];
 
     agentProxySocketHandler = new AgentProxySocketHandler();
+
+    /**
+     * Callback to restart the auto-update scheduler when settings change.
+     * Set by AutoUpdateScheduler on startup.
+     */
+    restartScheduler?: () => void;
+
+    /**
+     * Tracks the next image update check time (ISO string).
+     */
+    nextImageCheckTime?: string;
+
+    /**
+     * Reference to the auto-update scheduler for querying next run time.
+     */
+    autoUpdateScheduler?: AutoUpdateScheduler;
 
     /**
      * List of socket handlers (support agent)
@@ -188,6 +209,9 @@ export class DockgeServer {
             log.info("server", "Server Type: HTTP");
             this.httpServer = http.createServer(this.app);
         }
+
+        // JSON body parsing for API routes
+        this.app.use(express.json());
 
         // Binding Routers
         for (const router of this.routerList) {
@@ -366,6 +390,9 @@ export class DockgeServer {
             process.exit(1);
         }
 
+        // Load auto-update cache from DB
+        await Stack.loadAutoUpdateCache();
+
         // First time setup if needed
         let jwtSecretBean = await R.findOne("setting", " `key` = ? ", [
             "jwtSecret",
@@ -424,6 +451,11 @@ export class DockgeServer {
                 },
                 60 * 1000
             );
+
+            // Start auto-update scheduler
+            const scheduler = new AutoUpdateScheduler(this);
+            this.autoUpdateScheduler = scheduler;
+            scheduler.start();
         });
 
         gracefulShutdown(this.httpServer, {
@@ -609,6 +641,8 @@ export class DockgeServer {
             }
         }
         log.info("checkImageUpdates", "Check for image updates finished.");
+
+        this.nextImageCheckTime = new Date(Date.now() + updatePeriod).toISOString();
 
         setTimeout(
             () => {

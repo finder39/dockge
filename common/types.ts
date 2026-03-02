@@ -27,7 +27,8 @@ export type SimpleStackData = {
     tags: string[],
     isManagedByDockge: boolean,
     composeFileName: string,
-    endpoint: string
+    endpoint: string,
+    autoUpdate?: boolean
 }
 
 export type StackData = SimpleStackData & {

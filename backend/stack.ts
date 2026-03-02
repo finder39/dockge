@@ -21,11 +21,26 @@ import { InteractiveTerminal, Terminal } from "./terminal";
 import childProcessAsync from "promisify-child-process";
 import { Settings } from "./settings";
 import { ImageRepository } from "./image-repository";
+import { StackSettingsService } from "./stack-settings-service";
 import { SimpleStackData, StackData, ServiceData, StatsData } from "../common/types";
 import { ComposeDocument } from "../common/compose-document";
 import { LABEL_STATUS_IGNORE, LABEL_IMAGEUPDATES_CHECK, LABEL_IMAGEUPDATES_IGNORE } from "../common/compose-labels";
 
 export class Stack {
+
+    static autoUpdateCache: Map<string, boolean> = new Map();
+
+    static autoUpdateCacheKey(stackName: string, endpoint: string): string {
+        return `${endpoint}:${stackName}`;
+    }
+
+    static async loadAutoUpdateCache(): Promise<void> {
+        const stacks = await StackSettingsService.getAllAutoUpdateStacks();
+        Stack.autoUpdateCache.clear();
+        for (const s of stacks) {
+            Stack.autoUpdateCache.set(Stack.autoUpdateCacheKey(s.stackName, s.endpoint), true);
+        }
+    }
 
     name: string;
     protected _status: number = UNKNOWN;
@@ -37,6 +52,10 @@ export class Stack {
     protected _unhealthy: boolean = false;
     protected _imageUpdatesAvailable: boolean = false;
     protected _recreateNecessary: boolean = false;
+
+    get imageUpdatesAvailable(): boolean {
+        return this._imageUpdatesAvailable;
+    }
     protected _services: Map<string, ServiceData> = new Map();
     protected server: DockgeServer;
 
@@ -99,8 +118,13 @@ export class Stack {
             tags: [],
             isManagedByDockge: this.isManagedByDockge,
             composeFileName: this._composeFileName,
-            endpoint
+            endpoint,
+            autoUpdate: Stack.autoUpdateCache.get(Stack.autoUpdateCacheKey(this.name, endpoint)) ?? false
         };
+    }
+
+    get services() : Map<string, ServiceData> {
+        return this._services;
     }
 
     get isManagedByDockge() : boolean {
@@ -680,8 +704,8 @@ export class Stack {
         // If the stack is running, restart it
         await this.updateData();
         if (this.isStarted) {
-            sleep(500); // sleep to wait for terminal output finished
- 
+            await sleep(500); // sleep to wait for terminal output finished
+
             exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ "compose", "up", "-d", "--remove-orphans" ], this.path);
             if (exitCode !== 0) {
                 throw new Error("Failed to restart, please check the terminal output for more information.");
@@ -689,7 +713,7 @@ export class Stack {
         }
 
         if (pruneAfterUpdate) {
-            sleep(500); // sleep to wait for terminal output finished
+            await sleep(500); // sleep to wait for terminal output finished
 
             const dockerParams = ["image", "prune", "-f"];
             if (pruneAllAfterUpdate) {
@@ -712,7 +736,7 @@ export class Stack {
             throw new Error("Failed to pull, please check the terminal output for more information.");
         }
 
-        sleep(500); // sleep to wait for terminal output finished
+        await sleep(500); // sleep to wait for terminal output finished
 
         exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ "compose", "up", "-d", "--remove-orphans", service ], this.path);
         if (exitCode !== 0) {
@@ -720,7 +744,7 @@ export class Stack {
         }
 
         if (pruneAfterUpdate) {
-            sleep(500); // sleep to wait for terminal output finished
+            await sleep(500); // sleep to wait for terminal output finished
 
             const dockerParams = ["image", "prune", "-f"];
             if (pruneAllAfterUpdate) {
