@@ -216,6 +216,32 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 let errorMessage: string | null = null;
 
                 const stack = await Stack.getStack(server, stackName);
+
+                // Self-update detection: send callback before we die
+                if (await stack.isSelfStack()) {
+                    await stack.selfUpdate(pruneAfterUpdate, pruneAllAfterUpdate);
+                    const completedAt = new Date().toISOString();
+                    const durationMs = Date.now() - startTime;
+                    await UpdateHistoryService.recordUpdate(
+                        stackName,
+                        socket.endpoint || "",
+                        "manual",
+                        true,
+                        "Self-update initiated, agent restarting",
+                        null,
+                        startedAt,
+                        completedAt,
+                        durationMs
+                    );
+                    callbackResult({
+                        ok: true,
+                        msg: "Self-update initiated, agent restarting",
+                        selfUpdate: true,
+                    }, callback);
+                    server.sendStackList();
+                    return;
+                }
+
                 try {
                     await stack.update(socket, pruneAfterUpdate, pruneAllAfterUpdate);
                 } catch (e) {
@@ -482,6 +508,26 @@ export class DockerSocketHandler extends AgentSocketHandler {
         });
 
         // Services status
+        agentSocket.on("checkStackUpdates", async (stackName : unknown, callback) => {
+            try {
+                checkLogin(socket);
+
+                if (typeof(stackName) !== "string") {
+                    throw new ValidationError("Stack name must be a string");
+                }
+
+                const stack = await Stack.getStack(server, stackName, false);
+                await stack.updateData();
+                await stack.updateImageInfos();
+                callbackResult({
+                    ok: true,
+                    imageUpdatesAvailable: stack.imageUpdatesAvailable,
+                }, callback);
+            } catch (e) {
+                callbackError(e, callback);
+            }
+        });
+
         agentSocket.on("updateStackData", async (stackName : unknown, callback) => {
             try {
                 checkLogin(socket);

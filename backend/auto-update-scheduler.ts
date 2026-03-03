@@ -119,6 +119,22 @@ export class AutoUpdateScheduler {
         try {
             const stack = await Stack.getStack(this.server, stackName);
 
+            // Self-update detection
+            if (await stack.isSelfStack()) {
+                await stack.selfUpdate(pruneAfterUpdate, pruneAllAfterUpdate);
+                output = "Self-update initiated, process will restart";
+                log.info("scheduler", `Self-update initiated for stack ${stackName}`);
+
+                // Record history before we die
+                const completedAt = new Date().toISOString();
+                const durationMs = Date.now() - startTime;
+                await UpdateHistoryService.recordUpdate(
+                    stackName, endpoint, "scheduled", true, output, null,
+                    startedAt, completedAt, durationMs
+                );
+                return;
+            }
+
             // Run docker compose pull && up -d directly (no terminal/socket needed)
             const pullResult = await childProcessAsync.spawn("docker", ["compose", "pull"], {
                 cwd: stack.path,
@@ -176,8 +192,11 @@ export class AutoUpdateScheduler {
                 const ds = s as unknown as { instanceManager?: { emitToEndpoint: (endpoint: string, event: string, ...args: unknown[]) => Promise<unknown> } };
                 if (ds.instanceManager) {
                     await new Promise<void>((resolve, reject) => {
-                        ds.instanceManager!.emitToEndpoint(endpoint, "updateStack", stackName, pruneAfterUpdate, pruneAllAfterUpdate, (result: { ok?: boolean; msg?: string }) => {
+                        ds.instanceManager!.emitToEndpoint(endpoint, "updateStack", stackName, pruneAfterUpdate, pruneAllAfterUpdate, (result: { ok?: boolean; msg?: string; selfUpdate?: boolean }) => {
                             if (result?.ok) {
+                                if (result.selfUpdate) {
+                                    log.info("scheduler", `Agent ${endpoint} is self-updating stack ${stackName}, will restart`);
+                                }
                                 resolve();
                             } else {
                                 reject(new Error(result?.msg ?? "Update failed"));

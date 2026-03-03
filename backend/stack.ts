@@ -694,7 +694,61 @@ export class Stack {
         return exitCode;
     }
 
+    /**
+     * Check if this stack contains Dockge's own container.
+     */
+    async isSelfStack(): Promise<boolean> {
+        const hostname = process.env.HOSTNAME;
+        if (!hostname) {
+            return false;
+        }
+        try {
+            const result = await childProcessAsync.spawn("docker", ["compose", "ps", "-q"], {
+                cwd: this.path,
+                encoding: "utf-8",
+            });
+            const containerIds = (result.stdout || "").toString().trim().split("\n").filter(Boolean);
+            return containerIds.some(id => id.startsWith(hostname) || hostname.startsWith(id));
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Perform a self-update by pulling images and spawning an updater container
+     * that outlives this Dockge instance and restarts the stack.
+     */
+    async selfUpdate(pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean): Promise<void> {
+        // Pull first while we're still alive
+        await childProcessAsync.spawn("docker", ["compose", "pull"], {
+            cwd: this.path,
+            encoding: "utf-8",
+        });
+
+        // Build update script for the updater container
+        let script = `sleep 5 && cd ${this.path} && docker compose up -d --remove-orphans`;
+        if (pruneAfterUpdate) {
+            script += ` && docker image prune -f${pruneAllAfterUpdate ? " -a" : ""}`;
+        }
+
+        // Spawn updater container that outlives us
+        await childProcessAsync.spawn("docker", [
+            "run", "-d", "--rm",
+            "--name", `dockge-self-updater-${Date.now()}`,
+            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            "-v", `${this.path}:${this.path}`,
+            "docker:cli",
+            "sh", "-c", script,
+        ], { encoding: "utf-8" });
+    }
+
     async update(socket: DockgeSocket, pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean) {
+        // Self-update detection: if this stack contains Dockge itself, use the updater container approach
+        if (await this.isSelfStack()) {
+            await this.selfUpdate(pruneAfterUpdate, pruneAllAfterUpdate);
+            return 0;
+        }
+
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
         let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ "compose", "pull" ], this.path);
         if (exitCode !== 0) {

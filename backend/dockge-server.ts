@@ -456,6 +456,10 @@ export class DockgeServer {
             const scheduler = new AutoUpdateScheduler(this);
             this.autoUpdateScheduler = scheduler;
             scheduler.start();
+
+            // Pre-pull docker:cli image for self-updates (fire-and-forget)
+            childProcessAsync.spawn("docker", ["pull", "docker:cli"], { encoding: "utf-8" })
+                .catch(e => log.warn("server", "Failed to pre-pull docker:cli: " + (e instanceof Error ? e.message : String(e))));
         });
 
         gracefulShutdown(this.httpServer, {
