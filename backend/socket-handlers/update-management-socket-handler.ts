@@ -1,5 +1,6 @@
 import { SocketHandler } from "../socket-handler";
 import { DockgeServer } from "../dockge-server";
+import { log } from "../log";
 import { callbackError, checkLogin, DockgeSocket, ValidationError } from "../util-server";
 import { StackSettingsService } from "../stack-settings-service";
 import { UpdateHistoryService } from "../update-history-service";
@@ -180,44 +181,34 @@ export class UpdateManagementSocketHandler extends SocketHandler {
                     throw new ValidationError("Endpoint must be a string");
                 }
 
-                if (endpoint !== "" && endpoint !== socket.endpoint) {
-                    // Proxy to agent
-                    const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
-                        socket.instanceManager.emitToEndpoint(endpoint, "checkStackUpdates", stackName, (res: Record<string, unknown>) => {
-                            if (res.ok) {
-                                resolve(res);
-                            } else {
-                                reject(new Error(res.msg as string || "Agent check failed"));
-                            }
-                        });
-                        setTimeout(() => reject(new Error("Agent check timed out")), 30000);
-                    });
-
-                    server.sendStackList();
-
-                    callback({
-                        ok: true,
-                        msg: "checkCompleted",
-                        msgi18n: true,
-                        imageUpdatesAvailable: result.imageUpdatesAvailable ?? false,
-                    });
-                    return;
-                }
-
-                const stack = await Stack.getStack(server, stackName, false);
-                await stack.updateData();
-                await stack.updateImageInfos();
-                // Re-read data after image info update
-                await stack.updateData();
-
-                server.sendStackList();
-
+                // Respond immediately, run check in background
                 callback({
                     ok: true,
-                    msg: "checkCompleted",
+                    msg: "checkStarted",
                     msgi18n: true,
-                    imageUpdatesAvailable: stack.imageUpdatesAvailable,
                 });
+
+                if (endpoint !== "" && endpoint !== socket.endpoint) {
+                    // Proxy to agent — fire and forget, agent will update its stack list
+                    socket.instanceManager.emitToEndpoint(endpoint, "checkStackUpdates", stackName, () => {
+                        server.sendStackList();
+                    }).catch((e: unknown) => {
+                        log.warn("checkStackUpdates", `Agent check failed for ${stackName} on ${endpoint}: ${e}`);
+                    });
+                } else {
+                    // Local — run in background
+                    (async () => {
+                        try {
+                            const stack = await Stack.getStack(server, stackName, false);
+                            await stack.updateData();
+                            await stack.updateImageInfos();
+                            await stack.updateData();
+                            server.sendStackList();
+                        } catch (e) {
+                            log.warn("checkStackUpdates", `Check failed for ${stackName}: ${e}`);
+                        }
+                    })();
+                }
             } catch (e) {
                 callbackError(e, callback);
             }

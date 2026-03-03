@@ -476,13 +476,14 @@ export class Stack {
 
     async updateImageInfos() {
         Stack.imageRepository.resetStack(this.name);
-        for (const serviceData of this._services.values()) {
+        const promises = Array.from(this._services.values()).map(async (serviceData) => {
             try {
                 await Stack.imageRepository.update(this.name, serviceData.name, serviceData.image);
             } catch (e) {
                 log.error("updateImageInfos", "Stack '" + this.name + "' - Image '" + serviceData.image + "': " + e);
             }
-        }
+        });
+        await Promise.all(promises);
     }
 
     /**

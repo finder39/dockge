@@ -209,6 +209,7 @@
     "autoUpdate": "Auto Update",
     "checkUpdates": "Check Updates",
     "tooltipCheckUpdates": "Force check for image updates",
+    "checkStarted": "Checking for updates...",
     "checkCompleted": "Update check completed",
     "updateAll": "Update All",
     "updating": "Updating...",

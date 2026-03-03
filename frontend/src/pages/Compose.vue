@@ -36,9 +36,8 @@
                         <span class="d-none d-xl-inline">{{ $t("restartStack") }}</span>
                     </button>
 
-                    <button v-if="!isEditMode" class="btn btn-normal me-1" data-toggle="tooltip" :title="$t('tooltipCheckUpdates')" :disabled="processing || checkingUpdates" @click="checkStackUpdates">
-                        <font-awesome-icon v-if="checkingUpdates" icon="spinner" spin class="me-1" />
-                        <font-awesome-icon v-else icon="magnifying-glass" class="me-1" />
+                    <button v-if="!isEditMode" class="btn btn-normal me-1" data-toggle="tooltip" :title="$t('tooltipCheckUpdates')" :disabled="processing" @click="checkStackUpdates">
+                        <font-awesome-icon icon="magnifying-glass" class="me-1" />
                         <span class="d-none d-xl-inline">{{ $t("checkUpdates") }}</span>
                     </button>
 
@@ -53,7 +52,7 @@
                         <BForm>
                             <BFormCheckbox v-model="updateDialogData.pruneAfterUpdate" switch><span v-html="$t('pruneAfterUpdate')"></span></BFormCheckbox>
                             <div style="margin-left: 2.5rem;">
-                                <BFormCheckbox v-model="updateDialogData.pruneAllAfterUpdate" :checked="updateDialogData.pruneAfterUpdate && updateDialogData.pruneAllAfterUpdate" :disabled="!updateDialogData.pruneAfterUpdate"><span v-html="$t('pruneAllAfterUpdate')"></span></BFormCheckbox>
+                                <BFormCheckbox v-model="updateDialogData.pruneAllAfterUpdate" switch :checked="updateDialogData.pruneAfterUpdate && updateDialogData.pruneAllAfterUpdate" :disabled="!updateDialogData.pruneAfterUpdate"><span v-html="$t('pruneAllAfterUpdate')"></span></BFormCheckbox>
                             </div>
                         </BForm>
 
@@ -346,7 +345,6 @@ export default defineComponent({
             composeDocument: new ComposeDocument(),
             yamlError: "",
             processing: false,
-            checkingUpdates: false,
             combinedTerminalRows: COMBINED_TERMINAL_ROWS,
             combinedTerminalCols: COMBINED_TERMINAL_COLS,
             stack: {},
@@ -854,14 +852,8 @@ export default defineComponent({
         },
 
         checkStackUpdates() {
-            this.checkingUpdates = true;
             this.$root.getSocket().emit("checkStackUpdates", this.stack.name, this.endpoint, (res) => {
-                this.checkingUpdates = false;
-                if (res.ok) {
-                    this.$root.toastRes(res);
-                } else {
-                    this.$root.toastRes(res);
-                }
+                this.$root.toastRes(res);
             });
         },
 
