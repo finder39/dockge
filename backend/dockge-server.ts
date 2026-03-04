@@ -423,7 +423,7 @@ export class DockgeServer {
             if (this.config.hostname) {
                 log.info( "server", `Listening on ${this.config.hostname}:${this.config.port}`);
             } else {
-                log.info("server", `Listening on ${this.config.port}`);
+                log.info("server", `Listening on port ${this.config.port}`);
             }
 
             // Run every 10 seconds
