@@ -51,10 +51,16 @@ For general information about Dockge, please refer to the [original project](htt
 ## Usage
 
 ```yaml
-image: ghcr.io/finder39/dockge:latest
+image: ghcr.io/finder39/dockge:release
 ```
 
 Replace the image in your existing Dockge compose file. The image is built for **linux/amd64** and **linux/arm64**.
+
+| Tag | Description |
+|-----|-------------|
+| `:release` | Latest stable release (recommended) |
+| `:v2.0.1` | Pinned to a specific version |
+| `:latest` | Bleeding edge, built on every commit to master |
 
 > **Note:** Back up your Dockge data folder before switching, as this image modifies the database with new tables.
 

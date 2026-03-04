@@ -1,8 +1,8 @@
-name: Build and Push to GHCR
+name: Build and Push Release
 
 on:
-  push:
-    branches: [master]
+  release:
+    types: [published]
 
 env:
   REGISTRY: ghcr.io
@@ -41,7 +41,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:release
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
