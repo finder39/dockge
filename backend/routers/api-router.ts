@@ -406,14 +406,14 @@ export class ApiRouter extends Router {
                 const stack = await Stack.getStack(server, req.params.name, false);
                 await stack.updateData();
 
-                const pullResult = await childProcessAsync.spawn("docker", ["compose", "pull"], {
+                const pullResult = await childProcessAsync.spawn("docker", [...stack.composeArgs, "pull"], {
                     cwd: stack.path,
                     encoding: "utf-8",
                 });
 
                 let upResult;
                 if (stack.isStarted) {
-                    upResult = await childProcessAsync.spawn("docker", ["compose", "up", "-d", "--remove-orphans"], {
+                    upResult = await childProcessAsync.spawn("docker", [...stack.composeArgs, "up", "-d", "--remove-orphans"], {
                         cwd: stack.path,
                         encoding: "utf-8",
                     });
@@ -473,7 +473,7 @@ export class ApiRouter extends Router {
 
                 const stack = await Stack.getStack(server, req.params.name, false);
 
-                await childProcessAsync.spawn("docker", ["compose", "up", "-d", "--remove-orphans"], {
+                await childProcessAsync.spawn("docker", [...stack.composeArgs, "up", "-d", "--remove-orphans"], {
                     cwd: stack.path,
                     encoding: "utf-8",
                 });
@@ -516,7 +516,7 @@ export class ApiRouter extends Router {
 
                 const stack = await Stack.getStack(server, req.params.name, false);
 
-                await childProcessAsync.spawn("docker", ["compose", "stop"], {
+                await childProcessAsync.spawn("docker", [...stack.composeArgs, "stop"], {
                     cwd: stack.path,
                     encoding: "utf-8",
                 });
@@ -559,7 +559,7 @@ export class ApiRouter extends Router {
 
                 const stack = await Stack.getStack(server, req.params.name, false);
 
-                await childProcessAsync.spawn("docker", ["compose", "restart"], {
+                await childProcessAsync.spawn("docker", [...stack.composeArgs, "restart"], {
                     cwd: stack.path,
                     encoding: "utf-8",
                 });
@@ -720,10 +720,10 @@ export class ApiRouter extends Router {
                         const startedAt = new Date().toISOString();
                         const startTime = Date.now();
                         try {
-                            await childProcessAsync.spawn("docker", ["compose", "pull"], { cwd: stack.path, encoding: "utf-8" });
+                            await childProcessAsync.spawn("docker", [...stack.composeArgs, "pull"], { cwd: stack.path, encoding: "utf-8" });
                             await stack.updateData();
                             if (stack.isStarted) {
-                                await childProcessAsync.spawn("docker", ["compose", "up", "-d", "--remove-orphans"], { cwd: stack.path, encoding: "utf-8" });
+                                await childProcessAsync.spawn("docker", [...stack.composeArgs, "up", "-d", "--remove-orphans"], { cwd: stack.path, encoding: "utf-8" });
                             }
                             if (pruneAfterUpdate) {
                                 const pruneArgs = ["image", "prune", "-f"];
@@ -889,10 +889,10 @@ export class ApiRouter extends Router {
                         } else {
                             // Local
                             const stack = await Stack.getStack(server, stackName, false);
-                            await childProcessAsync.spawn("docker", ["compose", "pull"], { cwd: stack.path, encoding: "utf-8" });
+                            await childProcessAsync.spawn("docker", [...stack.composeArgs, "pull"], { cwd: stack.path, encoding: "utf-8" });
                             await stack.updateData();
                             if (stack.isStarted) {
-                                await childProcessAsync.spawn("docker", ["compose", "up", "-d", "--remove-orphans"], { cwd: stack.path, encoding: "utf-8" });
+                                await childProcessAsync.spawn("docker", [...stack.composeArgs, "up", "-d", "--remove-orphans"], { cwd: stack.path, encoding: "utf-8" });
                             }
                             if (pruneAfterUpdate) {
                                 const pruneArgs = ["image", "prune", "-f"];

@@ -138,7 +138,7 @@ export class AutoUpdateScheduler {
             }
 
             // Run docker compose pull && up -d directly (no terminal/socket needed)
-            const pullResult = await childProcessAsync.spawn("docker", ["compose", "pull"], {
+            const pullResult = await childProcessAsync.spawn("docker", [...stack.composeArgs, "pull"], {
                 cwd: stack.path,
                 encoding: "utf-8",
             });
@@ -146,7 +146,7 @@ export class AutoUpdateScheduler {
 
             await stack.updateData();
             if (stack.isStarted) {
-                const upResult = await childProcessAsync.spawn("docker", ["compose", "up", "-d", "--remove-orphans"], {
+                const upResult = await childProcessAsync.spawn("docker", [...stack.composeArgs, "up", "-d", "--remove-orphans"], {
                     cwd: stack.path,
                     encoding: "utf-8",
                 });

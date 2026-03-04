@@ -102,6 +102,7 @@ export class DockgeServer {
     jwtSecret : string = "";
 
     stacksDir : string = "";
+    stacksDirHost : string = "";
 
     /**
      *
@@ -179,6 +180,7 @@ export class DockgeServer {
         this.config.stacksDir = args.stacksDir || process.env.DOCKGE_STACKS_DIR || defaultStacksDir;
         this.config.enableConsole = args.enableConsole || process.env.DOCKGE_ENABLE_CONSOLE === "true" || false;
         this.stacksDir = this.config.stacksDir;
+        this.stacksDirHost = process.env.DOCKGE_STACKS_DIR_HOST || "";
 
         log.debug("server", this.config);
 
