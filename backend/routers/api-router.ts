@@ -516,6 +516,11 @@ export class ApiRouter extends Router {
 
                 const stack = await Stack.getStack(server, req.params.name, false);
 
+                if (await stack.isSelfStack()) {
+                    res.status(400).json({ ok: false, error: "Cannot stop the stack that contains Dockge itself" });
+                    return;
+                }
+
                 await childProcessAsync.spawn("docker", [...stack.composeArgs, "stop"], {
                     cwd: stack.path,
                     encoding: "utf-8",

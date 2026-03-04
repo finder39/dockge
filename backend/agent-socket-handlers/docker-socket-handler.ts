@@ -163,6 +163,15 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfStack()) {
+                    callbackResult({
+                        ok: false,
+                        msg: "Cannot stop the stack that contains Dockge itself. Use the per-service controls to manage other services in this stack.",
+                    }, callback);
+                    return;
+                }
+
                 await stack.stop(socket);
                 callbackResult({
                     ok: true,
@@ -185,6 +194,14 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfStack()) {
+                    const terminalName = getComposeTerminalName(socket.endpoint, stackName);
+                    socket.emitAgent("terminalWrite", terminalName, "\r\n\x1b[1;33m⚠ Self-restart detected\x1b[0m\r\n");
+                    socket.emitAgent("terminalWrite", terminalName, "This stack contains Dockge itself.\r\n");
+                    socket.emitAgent("terminalWrite", terminalName, "Dockge will disconnect briefly and reconnect automatically.\r\n");
+                }
+
                 await stack.restart(socket);
                 callbackResult({
                     ok: true,
@@ -296,6 +313,15 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfStack()) {
+                    callbackResult({
+                        ok: false,
+                        msg: "Cannot take down the stack that contains Dockge itself. Use the per-service controls to manage other services in this stack.",
+                    }, callback);
+                    return;
+                }
+
                 await stack.down(socket);
                 callbackResult({
                     ok: true,
@@ -322,6 +348,15 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfService(serviceName)) {
+                    callbackResult({
+                        ok: false,
+                        msg: "Cannot stop the Dockge service itself. Use the Update button to update Dockge.",
+                    }, callback);
+                    return;
+                }
+
                 await stack.stopService(socket, serviceName);
                 callbackResult({
                     ok: true,
@@ -374,6 +409,13 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfService(serviceName)) {
+                    const terminalName = getComposeTerminalName(socket.endpoint, stackName);
+                    socket.emitAgent("terminalWrite", terminalName, "\r\n\x1b[1;33m⚠ Restarting Dockge service\x1b[0m\r\n");
+                    socket.emitAgent("terminalWrite", terminalName, "Dockge will disconnect briefly and reconnect automatically.\r\n");
+                }
+
                 await stack.restartService(socket, serviceName);
                 callbackResult({
                     ok: true,
@@ -400,6 +442,15 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfService(serviceName)) {
+                    callbackResult({
+                        ok: false,
+                        msg: "Cannot recreate the Dockge service itself. Use the Update button to update Dockge.",
+                    }, callback);
+                    return;
+                }
+
                 await stack.recreateService(socket, serviceName);
                 callbackResult({
                     ok: true,
@@ -434,6 +485,15 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfService(serviceName)) {
+                    callbackResult({
+                        ok: false,
+                        msg: "Cannot update the Dockge service individually. Use the stack-level Update button instead.",
+                    }, callback);
+                    return;
+                }
+
                 await stack.updateService(socket, serviceName, pruneAfterUpdate, pruneAllAfterUpdate);
                 callbackResult({
                     ok: true,

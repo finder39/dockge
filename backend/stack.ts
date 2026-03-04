@@ -730,6 +730,29 @@ export class Stack {
     }
 
     /**
+     * Check if a specific service in this stack is Dockge's own container.
+     */
+    async isSelfService(serviceName: string): Promise<boolean> {
+        const hostname = process.env.HOSTNAME;
+        if (!hostname) {
+            return false;
+        }
+        try {
+            const result = await childProcessAsync.spawn("docker", [...this.composeArgs, "ps", "-q", serviceName], {
+                cwd: this.path,
+                encoding: "utf-8",
+            });
+            const containerId = (result.stdout || "").toString().trim();
+            if (!containerId) {
+                return false;
+            }
+            return containerId.startsWith(hostname) || hostname.startsWith(containerId);
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * Resolve the host path for the stacks directory by inspecting our own container's mounts.
      * Inside the container, stacksDir might be /opt/stacks, but on the host it could be /home/user/docker.
      */
