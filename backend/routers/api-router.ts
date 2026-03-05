@@ -62,8 +62,33 @@ function validateEndpoint(endpoint: string | undefined): boolean {
         return true; // empty = local/master
     }
     // Endpoint is a host:port string (e.g., "192.168.1.100:5001")
-    // Allow alphanumeric, dots, colons, hyphens
-    return /^[a-zA-Z0-9._:-]+$/.test(endpoint);
+    // Allow alphanumeric, dots, colons, hyphens, spaces
+    return /^[a-zA-Z0-9._: -]+$/.test(endpoint);
+}
+
+/**
+ * Resolve an endpoint query param that may be an agent name (e.g. "Voltorb")
+ * to the actual endpoint string. Returns the original value if no name match.
+ */
+async function resolveEndpoint(endpoint: string | undefined): Promise<string> {
+    if (!endpoint || endpoint === "") {
+        return "";
+    }
+    // If it looks like a host:port already, return as-is
+    if (/^\d/.test(endpoint) || endpoint.includes(":")) {
+        return endpoint;
+    }
+    // Try to match against agent names (case-insensitive)
+    const agentList = await Agent.getAgentList();
+    for (const url in agentList) {
+        const agent = agentList[url];
+        const name = agent.name || "";
+        if (name.toLowerCase() === endpoint.toLowerCase()) {
+            return agent.endpoint;
+        }
+    }
+    // No match — return original (will likely fail downstream, which is correct)
+    return endpoint;
 }
 
 /**
@@ -303,7 +328,7 @@ export class ApiRouter extends Router {
         // Optional query param: ?endpoint= to specify which agent (default: local)
         router.get("/api/stacks/:name/status", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
 
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
@@ -367,7 +392,7 @@ export class ApiRouter extends Router {
         // Optional query param: ?endpoint= to specify which agent (default: local)
         router.post("/api/stacks/:name/update", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
 
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
@@ -454,7 +479,7 @@ export class ApiRouter extends Router {
         // Optional query param: ?endpoint= to specify which agent (default: local)
         router.post("/api/stacks/:name/start", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
 
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
@@ -497,7 +522,7 @@ export class ApiRouter extends Router {
         // Optional query param: ?endpoint= to specify which agent (default: local)
         router.post("/api/stacks/:name/stop", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
 
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
@@ -545,7 +570,7 @@ export class ApiRouter extends Router {
         // Optional query param: ?endpoint= to specify which agent (default: local)
         router.post("/api/stacks/:name/restart", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
 
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
@@ -588,7 +613,7 @@ export class ApiRouter extends Router {
         // Optional query param: ?endpoint= to specify which agent (default: local)
         router.post("/api/system/prune", async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
 
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
@@ -624,7 +649,7 @@ export class ApiRouter extends Router {
         // POST /api/stacks/:name/check-updates — force check for image updates on a stack
         router.post("/api/stacks/:name/check-updates", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
                     return;
@@ -665,7 +690,7 @@ export class ApiRouter extends Router {
         // GET /api/stacks/:name/auto-update — get auto-update status
         router.get("/api/stacks/:name/auto-update", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
                     return;
@@ -681,7 +706,7 @@ export class ApiRouter extends Router {
         // PUT /api/stacks/:name/auto-update — set auto-update status
         router.put("/api/stacks/:name/auto-update", validateStackName, async (req: Request, res: Response) => {
             try {
-                const endpoint = (req.query.endpoint as string) || "";
+                const endpoint = await resolveEndpoint((req.query.endpoint as string) || "");
                 if (!validateEndpoint(endpoint)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
                     return;
@@ -704,8 +729,8 @@ export class ApiRouter extends Router {
         // ?endpoint=X: update only on that agent. No endpoint: update on ALL agents.
         router.post("/api/update-all", async (req: Request, res: Response) => {
             try {
-                const endpointFilter = req.query.endpoint as string | undefined;
-                if (endpointFilter !== undefined && !validateEndpoint(endpointFilter)) {
+                const rawEndpointFilter = req.query.endpoint as string | undefined;
+                if (rawEndpointFilter !== undefined && !validateEndpoint(rawEndpointFilter)) {
                     res.status(400).json({ ok: false, error: "Invalid endpoint format" });
                     return;
                 }
@@ -779,6 +804,7 @@ export class ApiRouter extends Router {
                     }
                 };
 
+                const endpointFilter = rawEndpointFilter !== undefined ? await resolveEndpoint(rawEndpointFilter) : undefined;
                 if (endpointFilter !== undefined) {
                     // Specific endpoint
                     if (!endpointFilter || endpointFilter === "") {
@@ -811,7 +837,7 @@ export class ApiRouter extends Router {
                 if (req.query.limit) options.limit = parseInt(req.query.limit as string, 10);
                 if (req.query.offset) options.offset = parseInt(req.query.offset as string, 10);
                 if (req.query.stack) options.stackName = req.query.stack as string;
-                if (req.query.endpoint !== undefined) options.endpoint = req.query.endpoint as string;
+                if (req.query.endpoint !== undefined) options.endpoint = await resolveEndpoint(req.query.endpoint as string);
                 if (req.query.trigger) options.triggerType = req.query.trigger as string;
                 if (req.query.success !== undefined) options.success = req.query.success === "true";
 
