@@ -33,6 +33,7 @@ import gracefulShutdown from "http-graceful-shutdown";
 import User from "./models/user";
 import childProcessAsync from "promisify-child-process";
 import { AgentManager } from "./agent-manager";
+import { ServerAgentManager } from "./server-agent-manager";
 import { AgentProxySocketHandler } from "./socket-handlers/agent-proxy-socket-handler";
 import { AgentSocketHandler } from "./agent-socket-handler";
 import { AgentSocket } from "../common/agent-socket";
@@ -84,6 +85,12 @@ export class DockgeServer {
      * Reference to the auto-update scheduler for querying next run time.
      */
     autoUpdateScheduler?: AutoUpdateScheduler;
+
+    /**
+     * Server-level agent manager — maintains persistent socket.io connections
+     * to all remote agents, independent of browser sessions.
+     */
+    serverAgentManager: ServerAgentManager = new ServerAgentManager();
 
     /**
      * List of socket handlers (support agent)
@@ -427,6 +434,9 @@ export class DockgeServer {
             log.info("server", "No user, need setup");
             this.needSetup = true;
         }
+
+        // Connect server-level agent manager (persistent, independent of browser sessions)
+        await this.serverAgentManager.connectAll();
 
         // Listen
         this.httpServer.listen(this.config.port, this.config.hostname, () => {
@@ -801,6 +811,7 @@ export class DockgeServer {
 
         // TODO: Close all terminals?
 
+        this.serverAgentManager.disconnectAll();
         await Database.close();
         Settings.stopCacheCleaner();
     }

@@ -92,10 +92,10 @@ async function resolveEndpoint(endpoint: string | undefined): Promise<string> {
 }
 
 /**
- * Find a logged-in DockgeSocket that has an instanceManager connected to agents.
- * Returns null if no suitable socket is found.
+ * Find a logged-in browser socket (used only for agent management operations
+ * that need to update the UI, like adding/removing agents).
  */
-function findAgentSocket(server: DockgeServer): DockgeSocket | null {
+function findBrowserSocket(server: DockgeServer): DockgeSocket | null {
     for (const [, socket] of server.io.sockets.sockets) {
         const ds = socket as DockgeSocket;
         if (ds.instanceManager && ds.userID) {
@@ -106,22 +106,16 @@ function findAgentSocket(server: DockgeServer): DockgeSocket | null {
 }
 
 /**
- * Emit an event to a remote agent via a connected socket's instanceManager.
+ * Emit an event to a remote agent via the server's persistent agent manager.
  * Returns a promise that resolves with the callback result.
  */
 function emitToAgent(server: DockgeServer, endpoint: string, eventName: string, ...args: unknown[]): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
-        const ds = findAgentSocket(server);
-        if (!ds) {
-            reject(new Error("No connected user session available to proxy to agents. A user must be logged in via the UI."));
-            return;
-        }
-
         const timeout = setTimeout(() => {
             reject(new Error(`Timeout waiting for response from agent ${endpoint}`));
         }, 30000);
 
-        ds.instanceManager.emitToEndpoint(endpoint, eventName, ...args, (result: Record<string, unknown>) => {
+        server.serverAgentManager.emitToEndpoint(endpoint, eventName, ...args, (result: Record<string, unknown>) => {
             clearTimeout(timeout);
             resolve(result);
         }).catch((e: Error) => {
@@ -195,17 +189,26 @@ export class ApiRouter extends Router {
                     return;
                 }
 
-                const ds = findAgentSocket(server);
-                if (!ds) {
-                    res.status(503).json({ ok: false, error: "No active session to manage agents. Ensure at least one socket is connected." });
-                    return;
-                }
+                // Test connectivity, persist to DB, connect both server-level and browser managers
+                server.serverAgentManager.connect(url, username || "", password || "");
 
-                const manager = ds.instanceManager;
-                await manager.test(url, username || "", password || "");
-                await manager.add(url, username || "", password || "", name || "");
-                manager.connect(url, username || "", password || "");
-                manager.sendAgentList();
+                const ds = findBrowserSocket(server);
+                if (ds) {
+                    const manager = ds.instanceManager;
+                    await manager.test(url, username || "", password || "");
+                    await manager.add(url, username || "", password || "", name || "");
+                    manager.connect(url, username || "", password || "");
+                    manager.sendAgentList();
+                } else {
+                    // No browser session — persist via DB directly
+                    const { R } = await import("redbean-node");
+                    let bean = R.dispense("agent") as Agent;
+                    bean.url = url;
+                    bean.username = username || "";
+                    bean.password = password || "";
+                    bean.name = name || "";
+                    await R.store(bean);
+                }
 
                 res.json({ ok: true, message: "Agent added successfully" });
             } catch (e) {
@@ -218,7 +221,6 @@ export class ApiRouter extends Router {
         // GET /api/agents/status — check connectivity of all agents
         router.get("/api/agents/status", async (_req: Request, res: Response) => {
             try {
-                const ds = findAgentSocket(server);
                 const agentList = await Agent.getAgentList();
                 const agents: { endpoint: string; name: string; url: string; connected: boolean }[] = [];
 
@@ -229,31 +231,11 @@ export class ApiRouter extends Router {
                     const agent = agentList[url];
                     if (!url || agent.endpoint === "") continue;
 
-                    let connected = false;
-                    if (ds) {
-                        try {
-                            // Try to reach the agent with a short timeout
-                            const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
-                                const timeout = setTimeout(() => reject(new Error("timeout")), 5000);
-                                ds.instanceManager.emitToEndpoint(agent.endpoint, "getStackList", (r: Record<string, unknown>) => {
-                                    clearTimeout(timeout);
-                                    resolve(r);
-                                }).catch((e: Error) => {
-                                    clearTimeout(timeout);
-                                    reject(e);
-                                });
-                            });
-                            connected = !!result.ok;
-                        } catch {
-                            connected = false;
-                        }
-                    }
-
                     agents.push({
                         endpoint: agent.endpoint,
                         name: agent.name || agent.endpoint,
                         url: agent.url,
-                        connected,
+                        connected: server.serverAgentManager.isConnected(agent.endpoint),
                     });
                 }
 

@@ -189,33 +189,18 @@ export class AutoUpdateScheduler {
         let errorMessage: string | null = null;
 
         try {
-            // Find a connected socket to proxy through
-            const sockets = await this.server.io.fetchSockets();
-            let proxied = false;
-
-            for (const s of sockets) {
-                const ds = s as unknown as { instanceManager?: { emitToEndpoint: (endpoint: string, event: string, ...args: unknown[]) => Promise<unknown> } };
-                if (ds.instanceManager) {
-                    await new Promise<void>((resolve, reject) => {
-                        ds.instanceManager!.emitToEndpoint(endpoint, "updateStack", stackName, pruneAfterUpdate, pruneAllAfterUpdate, (result: { ok?: boolean; msg?: string; selfUpdate?: boolean }) => {
-                            if (result?.ok) {
-                                if (result.selfUpdate) {
-                                    log.info("scheduler", `Agent ${endpoint} is self-updating stack ${stackName}, will restart`);
-                                }
-                                resolve();
-                            } else {
-                                reject(new Error(result?.msg ?? "Update failed"));
-                            }
-                        });
-                    });
-                    proxied = true;
-                    break;
-                }
-            }
-
-            if (!proxied) {
-                throw new Error(`No connected socket available to proxy to endpoint ${endpoint}`);
-            }
+            await new Promise<void>((resolve, reject) => {
+                this.server.serverAgentManager.emitToEndpoint(endpoint, "updateStack", stackName, pruneAfterUpdate, pruneAllAfterUpdate, (result: { ok?: boolean; msg?: string; selfUpdate?: boolean }) => {
+                    if (result?.ok) {
+                        if (result.selfUpdate) {
+                            log.info("scheduler", `Agent ${endpoint} is self-updating stack ${stackName}, will restart`);
+                        }
+                        resolve();
+                    } else {
+                        reject(new Error(result?.msg ?? "Update failed"));
+                    }
+                }).catch(reject);
+            });
 
             log.info("scheduler", `Updated stack ${stackName} on endpoint ${endpoint}`);
         } catch (e) {
