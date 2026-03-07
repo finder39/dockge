@@ -141,7 +141,7 @@ export class ApiRouter extends Router {
         router.get("/api/agents", async (_req: Request, res: Response) => {
             try {
                 const agentList = await Agent.getAgentList();
-                const agents: { endpoint: string; name: string; url: string }[] = [];
+                const agents: { endpoint: string; name: string; url: string; version: string | null }[] = [];
 
                 // The master agent may or may not be persisted in the DB (url="").
                 // Check if a master entry exists; if not, add a default one.
@@ -155,12 +155,14 @@ export class ApiRouter extends Router {
                             endpoint: "",
                             name: agent.name || "master",
                             url: "",
+                            version: server.packageJSON.version ?? null,
                         });
                     } else {
                         agents.push({
                             endpoint: agent.endpoint,
                             name: agent.name || agent.endpoint,
                             url: agent.url,
+                            version: server.serverAgentManager.getVersion(agent.endpoint) ?? null,
                         });
                     }
                 }
@@ -170,6 +172,7 @@ export class ApiRouter extends Router {
                         endpoint: "",
                         name: "master",
                         url: "",
+                        version: server.packageJSON.version ?? null,
                     });
                 }
 
@@ -222,10 +225,10 @@ export class ApiRouter extends Router {
         router.get("/api/agents/status", async (_req: Request, res: Response) => {
             try {
                 const agentList = await Agent.getAgentList();
-                const agents: { endpoint: string; name: string; url: string; connected: boolean }[] = [];
+                const agents: { endpoint: string; name: string; url: string; connected: boolean; version: string | null }[] = [];
 
                 // Master is always "connected"
-                agents.push({ endpoint: "", name: "master", url: "", connected: true });
+                agents.push({ endpoint: "", name: "master", url: "", connected: true, version: server.packageJSON.version ?? null });
 
                 for (const url in agentList) {
                     const agent = agentList[url];
@@ -236,6 +239,7 @@ export class ApiRouter extends Router {
                         name: agent.name || agent.endpoint,
                         url: agent.url,
                         connected: server.serverAgentManager.isConnected(agent.endpoint),
+                        version: server.serverAgentManager.getVersion(agent.endpoint) ?? null,
                     });
                 }
 

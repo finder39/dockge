@@ -53,6 +53,7 @@
 
                             <div class="mb-3">
                                 <span class="url">{{ !!agent.url ? agent.url : "local" }}</span>
+                                <span v-if="agent.version" class="version ms-2">v{{ agent.version }}</span>
                             </div>
 
                             <div class="d-flex flex-wrap gap-3 align-items-center">
@@ -483,6 +484,14 @@ export default defineComponent({
 .url {
     font-size: 0.8rem;
     color: #6c757d;
+}
+
+.version {
+    font-size: 0.75rem;
+    color: #6c757d;
+    background: rgba(108, 117, 125, 0.15);
+    padding: 1px 6px;
+    border-radius: 4px;
 }
 
 .shadow-box {

@@ -15,6 +15,7 @@ export class ServerAgentManager {
 
     protected agentSocketList: Record<string, SocketClient> = {};
     protected agentLoggedInList: Record<string, boolean> = {};
+    protected agentVersionList: Record<string, string> = {};
     protected _firstConnectTime: Dayjs = dayjs();
 
     get firstConnectTime(): Dayjs {
@@ -67,6 +68,13 @@ export class ServerAgentManager {
         client.on("disconnect", () => {
             log.info("server-agent-manager", "Disconnected from the socket server: " + endpoint);
             this.agentLoggedInList[endpoint] = false;
+        });
+
+        client.on("info", (res: LooseObject) => {
+            if (res.version) {
+                this.agentVersionList[endpoint] = res.version;
+                log.info("server-agent-manager", `Agent ${endpoint} version: ${res.version}`);
+            }
         });
 
         this.agentSocketList[endpoint] = client;
@@ -130,6 +138,10 @@ export class ServerAgentManager {
         }
 
         client.emit("agent", endpoint, eventName, ...args);
+    }
+
+    getVersion(endpoint: string): string | undefined {
+        return this.agentVersionList[endpoint];
     }
 
     /**

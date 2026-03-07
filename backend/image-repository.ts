@@ -14,7 +14,7 @@ export class ImageRepository {
     async update(stack: string, service: string, image: string): Promise<ImageInfo> {
         let imageInfo = await this.updateLocal(stack, service, image);
 
-        if (!!imageInfo.localDigest && !image.startsWith("sha256:")) {
+        if (!image.startsWith("sha256:")) {
             const resRemote = await childProcessAsync.spawn("skopeo", [ "inspect", "--no-tags", "--format", "{{ .Digest }}", "docker://" + image ], {
                 encoding: "utf-8",
             });
@@ -93,6 +93,14 @@ export class ImageInfo {
     ) {}
 
     isImageUpdateAvailable() {
-        return !!this.localDigest && !!this.remoteDigest && this.localDigest !== this.remoteDigest;
+        // Update available if: digests differ, OR image was built locally (no local digest)
+        // but a remote digest exists (meaning the registry has a pullable image)
+        if (!this.remoteDigest) {
+            return false;
+        }
+        if (!this.localDigest) {
+            return true;
+        }
+        return this.localDigest !== this.remoteDigest;
     }
 }

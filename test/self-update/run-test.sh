@@ -203,6 +203,111 @@ for s in data.get('stacks', []):
     AGENT_ENDPOINT=$(echo "$AGENT_STACK" | python3 -c "import sys,json; print(json.load(sys.stdin)['endpoint'])" 2>/dev/null)
     info "  Agent endpoint: $AGENT_ENDPOINT"
 
+    # Step 5.1: API auth — request without key returns 401
+    info "Step 5.1: Verifying API auth requirement..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PRIMARY_URL/api/stacks" 2>/dev/null) || true
+    if [ "$HTTP_CODE" = "401" ]; then
+        pass "Unauthenticated request returns 401"
+    else
+        fail "Expected 401, got $HTTP_CODE"
+        exit 1
+    fi
+
+    # Step 5.2: Auto-update toggle roundtrip
+    info "Step 5.2: Testing auto-update toggle..."
+    api PUT "$PRIMARY_URL/api/stacks/agent/auto-update?endpoint=$AGENT_ENDPOINT" \
+      -d '{"enabled": true}' > /dev/null
+    AU_STATUS=$(api GET "$PRIMARY_URL/api/stacks/agent/auto-update?endpoint=$AGENT_ENDPOINT" 2>/dev/null)
+    AU_ENABLED=$(echo "$AU_STATUS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('autoUpdate', False))" 2>/dev/null)
+    if [ "$AU_ENABLED" = "True" ]; then
+        pass "Auto-update enabled successfully"
+    else
+        fail "Auto-update not enabled: $AU_STATUS"
+        exit 1
+    fi
+    api PUT "$PRIMARY_URL/api/stacks/agent/auto-update?endpoint=$AGENT_ENDPOINT" \
+      -d '{"enabled": false}' > /dev/null
+    AU_STATUS2=$(api GET "$PRIMARY_URL/api/stacks/agent/auto-update?endpoint=$AGENT_ENDPOINT" 2>/dev/null)
+    AU_ENABLED2=$(echo "$AU_STATUS2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('autoUpdate', False))" 2>/dev/null)
+    if [ "$AU_ENABLED2" = "False" ]; then
+        pass "Auto-update disabled successfully"
+    else
+        fail "Auto-update not disabled: $AU_STATUS2"
+        exit 1
+    fi
+
+    # Step 5.3: Check updates
+    info "Step 5.3: Testing check-updates endpoint..."
+    CHECK_RESULT=$(api POST "$PRIMARY_URL/api/stacks/agent/check-updates?endpoint=$AGENT_ENDPOINT" 2>&1) || true
+    if echo "$CHECK_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('ok') == True" 2>/dev/null; then
+        pass "Check updates completed"
+    else
+        warn "Check updates response: $CHECK_RESULT (may be expected without skopeo)"
+    fi
+
+    # Step 5.4: Scheduler CRUD
+    info "Step 5.4: Testing scheduler settings..."
+    SCHED=$(api GET "$PRIMARY_URL/api/scheduler" 2>/dev/null)
+    if echo "$SCHED" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'cronExpression' in d" 2>/dev/null; then
+        pass "Scheduler GET returns settings"
+    else
+        fail "Scheduler GET missing expected fields: $SCHED"
+        exit 1
+    fi
+    # Update cron and verify roundtrip
+    api PUT "$PRIMARY_URL/api/scheduler" -d '{"cronExpression": "0 4 * * *"}' > /dev/null
+    SCHED2=$(api GET "$PRIMARY_URL/api/scheduler" 2>/dev/null)
+    CRON=$(echo "$SCHED2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cronExpression',''))" 2>/dev/null)
+    if [ "$CRON" = "0 4 * * *" ]; then
+        pass "Scheduler cron updated successfully"
+    else
+        fail "Scheduler cron not updated: $CRON"
+        exit 1
+    fi
+    # Restore default
+    api PUT "$PRIMARY_URL/api/scheduler" -d '{"cronExpression": "0 3 * * *"}' > /dev/null
+
+    # Step 5.5: Update history
+    info "Step 5.5: Testing update history..."
+    HIST=$(api GET "$PRIMARY_URL/api/update-history?limit=10" 2>/dev/null)
+    if echo "$HIST" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('ok') == True and isinstance(d.get('entries', []), list)" 2>/dev/null; then
+        pass "Update history returns a list"
+    else
+        fail "Update history unexpected format: $HIST"
+        exit 1
+    fi
+
+    # Step 5.6: Error handling — nonexistent stack returns error, not crash
+    info "Step 5.6: Testing error handling for nonexistent stack..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$PRIMARY_URL/api/stacks/nonexistent_stack_12345/stop" \
+      -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" 2>/dev/null) || true
+    if [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "500" ]; then
+        pass "Stop nonexistent stack returns $HTTP_CODE (not crash)"
+    else
+        fail "Stop nonexistent stack unexpected code: $HTTP_CODE"
+        exit 1
+    fi
+
+    # Step 5.7: Health endpoint returns version
+    info "Step 5.7: Verifying health endpoint has version..."
+    HEALTH=$(curl -sf "$PRIMARY_URL/api/health" 2>/dev/null)
+    if echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('version')" 2>/dev/null; then
+        pass "Health endpoint returns version"
+    else
+        fail "Health endpoint missing version: $HEALTH"
+        exit 1
+    fi
+
+    # Step 5.8: /api/agents returns version
+    info "Step 5.8: Verifying /api/agents includes version field..."
+    AGENTS=$(api GET "$PRIMARY_URL/api/agents" 2>/dev/null)
+    if echo "$AGENTS" | python3 -c "import sys,json; agents=json.load(sys.stdin)['agents']; assert any(a.get('version') for a in agents), 'No version in agents'" 2>/dev/null; then
+        pass "/api/agents includes version"
+    else
+        fail "/api/agents missing version field: $AGENTS"
+        exit 1
+    fi
+
     # Step 6: Get agent container ID before update
     AGENT_CID_BEFORE=$(docker inspect --format '{{.Id}}' dockge-test-agent 2>/dev/null | head -c 12)
     info "Step 6: Agent container ID before update: $AGENT_CID_BEFORE"
