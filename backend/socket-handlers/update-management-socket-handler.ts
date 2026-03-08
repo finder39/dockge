@@ -188,11 +188,15 @@ export class UpdateManagementSocketHandler extends SocketHandler {
                     msgi18n: true,
                 });
 
+                server.sseManager?.broadcast("operation_started", { operation: "check-updates", stack: stackName, endpoint });
+
                 if (endpoint !== "" && endpoint !== socket.endpoint) {
                     // Proxy to agent — fire and forget, agent will update its stack list
                     socket.instanceManager.emitToEndpoint(endpoint, "checkStackUpdates", stackName, () => {
+                        server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: true });
                         server.sendStackList();
                     }).catch((e: unknown) => {
+                        server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: false });
                         log.warn("checkStackUpdates", `Agent check failed for ${stackName} on ${endpoint}: ${e}`);
                     });
                 } else {
@@ -203,8 +207,10 @@ export class UpdateManagementSocketHandler extends SocketHandler {
                             await stack.updateData();
                             await stack.updateImageInfos();
                             await stack.updateData();
+                            server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: true });
                             server.sendStackList();
                         } catch (e) {
+                            server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: false });
                             log.warn("checkStackUpdates", `Check failed for ${stackName}: ${e}`);
                         }
                     })();

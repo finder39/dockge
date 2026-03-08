@@ -42,6 +42,7 @@ import { UpdateManagementSocketHandler } from "./socket-handlers/update-manageme
 import { Terminal } from "./terminal";
 import { AgentMaintenanceSocketHandler } from "./agent-socket-handlers/agent-maintenance-socket-handler";
 import { AutoUpdateScheduler } from "./auto-update-scheduler";
+import { SSEManager } from "./sse-manager";
 
 export class DockgeServer {
     app : Express;
@@ -91,6 +92,11 @@ export class DockgeServer {
      * to all remote agents, independent of browser sessions.
      */
     serverAgentManager: ServerAgentManager = new ServerAgentManager();
+
+    /**
+     * SSE manager for push events to REST API clients.
+     */
+    sseManager: SSEManager = new SSEManager();
 
     /**
      * List of socket handlers (support agent)
@@ -226,6 +232,9 @@ export class DockgeServer {
         for (const router of this.routerList) {
             this.app.use(router.create(this.app, this));
         }
+
+        // Start SSE heartbeat for push event clients
+        this.sseManager.startHeartbeat();
 
         // Static files
         this.app.use("/", expressStaticGzip("frontend-dist", {
@@ -690,12 +699,20 @@ export class DockgeServer {
 
     async updateAvailableStackImageUpdates(updatePeriod: number) {
         const stackList = await Stack.getStackList(this, true);
+        const results: { name: string; endpoint: string; updatesAvailable: boolean }[] = [];
         for (const stack of stackList.values()) {
             if (stack.isManagedByDockge) {
                 await stack.updateImageInfos();
+                results.push({
+                    name: stack.name,
+                    endpoint: "",
+                    updatesAvailable: stack.imageUpdatesAvailable,
+                });
             }
         }
         log.info("checkImageUpdates", "Check for image updates finished.");
+
+        this.sseManager.broadcast("image_check_completed", { stacks: results });
 
         this.nextImageCheckTime = new Date(Date.now() + updatePeriod).toISOString();
 

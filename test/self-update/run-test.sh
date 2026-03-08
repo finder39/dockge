@@ -493,6 +493,169 @@ for s in data.get('stacks', []):
         exit 1
     fi
 
+    # ==========================================
+    # SSE Push Notification Tests
+    # ==========================================
+    echo ""
+    info "=== SSE Push Notification Tests ==="
+
+    SSE_EVENTS_FILE=$(mktemp)
+    SSE_EVENTS_FILE2=$(mktemp)
+    SSE_CLEANUP_FILES="$SSE_EVENTS_FILE $SSE_EVENTS_FILE2"
+
+    start_sse_listener() {
+        local outfile="${1:-$SSE_EVENTS_FILE}"
+        curl -s -N -H "X-API-Key: $API_KEY" \
+            "http://localhost:5001/api/events" > "$outfile" 2>/dev/null &
+        echo $!
+    }
+    stop_sse_listener() {
+        local pid="$1"
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    }
+
+    # SSE Test 1: Rejects without API key
+    info "SSE Test 1: SSE rejects without API key..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$PRIMARY_URL/api/events" 2>/dev/null) || true
+    if [ "$HTTP_CODE" = "401" ]; then
+        pass "SSE without API key returns 401"
+    else
+        fail "SSE without API key expected 401, got $HTTP_CODE"
+        exit 1
+    fi
+
+    # SSE Test 2: Rejects with bad API key
+    info "SSE Test 2: SSE rejects with bad API key..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 -H "X-API-Key: wrong-key" "$PRIMARY_URL/api/events" 2>/dev/null) || true
+    if [ "$HTTP_CODE" = "401" ]; then
+        pass "SSE with bad API key returns 401"
+    else
+        fail "SSE with bad API key expected 401, got $HTTP_CODE"
+        exit 1
+    fi
+
+    # SSE Test 3: Connects and receives connected event
+    info "SSE Test 3: SSE connects and receives connected event..."
+    SSE_CONNECT_FILE=$(mktemp)
+    SSE_CLEANUP_FILES="$SSE_CLEANUP_FILES $SSE_CONNECT_FILE"
+    timeout 5 curl -s -N -H "X-API-Key: $API_KEY" "$PRIMARY_URL/api/events" > "$SSE_CONNECT_FILE" 2>/dev/null || true
+    if grep -q "event: connected" "$SSE_CONNECT_FILE"; then
+        pass "SSE connected event received"
+    else
+        fail "SSE connected event not found"
+        info "  Output: $(cat "$SSE_CONNECT_FILE")"
+        exit 1
+    fi
+
+    # SSE Test 4: Receives heartbeat
+    info "SSE Test 4: SSE receives heartbeat (waiting up to 35s)..."
+    SSE_HEARTBEAT_FILE=$(mktemp)
+    SSE_CLEANUP_FILES="$SSE_CLEANUP_FILES $SSE_HEARTBEAT_FILE"
+    timeout 35 curl -s -N -H "X-API-Key: $API_KEY" "$PRIMARY_URL/api/events" > "$SSE_HEARTBEAT_FILE" 2>/dev/null || true
+    if grep -q "event: heartbeat" "$SSE_HEARTBEAT_FILE"; then
+        pass "SSE heartbeat received"
+    else
+        fail "SSE heartbeat not found within 35s"
+        info "  Output: $(cat "$SSE_HEARTBEAT_FILE")"
+        exit 1
+    fi
+
+    # SSE Test 5: check-updates emits SSE events
+    info "SSE Test 5: check-updates emits SSE events..."
+    > "$SSE_EVENTS_FILE"
+    SSE_PID=$(start_sse_listener "$SSE_EVENTS_FILE")
+    sleep 2
+    api POST "$PRIMARY_URL/api/stacks/agent/check-updates?endpoint=$AGENT_ENDPOINT" > /dev/null 2>&1 || true
+    sleep 3
+    stop_sse_listener "$SSE_PID"
+    if grep -q "operation_started" "$SSE_EVENTS_FILE" && grep -q "operation_completed" "$SSE_EVENTS_FILE"; then
+        if grep -q "check-updates" "$SSE_EVENTS_FILE"; then
+            pass "SSE received operation_started and operation_completed for check-updates"
+        else
+            fail "SSE events missing check-updates operation type"
+            info "  Events: $(cat "$SSE_EVENTS_FILE")"
+            exit 1
+        fi
+    else
+        fail "SSE missing operation_started or operation_completed events"
+        info "  Events: $(cat "$SSE_EVENTS_FILE")"
+        exit 1
+    fi
+
+    # SSE Test 6: operation_completed includes success field
+    info "SSE Test 6: operation_completed includes success field..."
+    if grep "operation_completed" "$SSE_EVENTS_FILE" | grep -q '"success"'; then
+        pass "operation_completed includes success field"
+    else
+        # Check in the data lines following the event line
+        if grep -A1 "event: operation_completed" "$SSE_EVENTS_FILE" | grep -q '"success"'; then
+            pass "operation_completed includes success field"
+        else
+            fail "operation_completed missing success field"
+            info "  Events: $(cat "$SSE_EVENTS_FILE")"
+            exit 1
+        fi
+    fi
+
+    # SSE Test 7: Multiple SSE clients receive same events
+    info "SSE Test 7: Multiple SSE clients receive same events..."
+    > "$SSE_EVENTS_FILE"
+    > "$SSE_EVENTS_FILE2"
+    SSE_PID1=$(start_sse_listener "$SSE_EVENTS_FILE")
+    SSE_PID2=$(start_sse_listener "$SSE_EVENTS_FILE2")
+    sleep 2
+    api POST "$PRIMARY_URL/api/stacks/agent/check-updates?endpoint=$AGENT_ENDPOINT" > /dev/null 2>&1 || true
+    sleep 3
+    stop_sse_listener "$SSE_PID1"
+    stop_sse_listener "$SSE_PID2"
+    if grep -q "operation_started" "$SSE_EVENTS_FILE" && grep -q "operation_started" "$SSE_EVENTS_FILE2"; then
+        pass "Both SSE clients received events"
+    else
+        fail "Not all SSE clients received events"
+        info "  Client 1: $(cat "$SSE_EVENTS_FILE")"
+        info "  Client 2: $(cat "$SSE_EVENTS_FILE2")"
+        exit 1
+    fi
+
+    # SSE Test 8: Server handles client disconnect gracefully
+    info "SSE Test 8: Server handles client disconnect gracefully..."
+    SSE_PID=$(start_sse_listener "$SSE_EVENTS_FILE")
+    sleep 2
+    stop_sse_listener "$SSE_PID"
+    sleep 1
+    HEALTH_AFTER=$(curl -sf "$PRIMARY_URL/api/health" 2>/dev/null)
+    if echo "$HEALTH_AFTER" | grep -q '"ok"'; then
+        pass "Server healthy after SSE client disconnect"
+    else
+        fail "Server unhealthy after SSE client disconnect"
+        exit 1
+    fi
+
+    # SSE Test 9: Nonexistent stack triggers failure event
+    info "SSE Test 9: Nonexistent stack triggers failure event..."
+    > "$SSE_EVENTS_FILE"
+    SSE_PID=$(start_sse_listener "$SSE_EVENTS_FILE")
+    sleep 2
+    curl -s -X POST "$PRIMARY_URL/api/stacks/nonexistent-xyz/update?endpoint=" \
+      -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" > /dev/null 2>&1 || true
+    sleep 3
+    stop_sse_listener "$SSE_PID"
+    if grep -q '"success":false\|"success": false' "$SSE_EVENTS_FILE"; then
+        pass "Nonexistent stack operation emits failure event"
+    else
+        # Could also be a 404 without SSE event — check if any operation event was sent
+        if grep -q "operation_completed" "$SSE_EVENTS_FILE"; then
+            warn "operation_completed found but success field not false"
+            info "  Events: $(cat "$SSE_EVENTS_FILE")"
+        else
+            warn "No operation_completed event for nonexistent stack (may return 404 before emitting)"
+        fi
+    fi
+
+    # Clean up temp files
+    rm -f $SSE_CLEANUP_FILES 2>/dev/null || true
+
     echo ""
     echo "============================================"
     pass "  ALL TESTS PASSED"

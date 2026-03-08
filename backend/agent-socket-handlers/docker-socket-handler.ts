@@ -22,6 +22,8 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     socket.emitAgent("terminalWrite", terminalName, "Dockge will disconnect briefly and reconnect automatically.\r\n");
                 }
 
+                const endpoint = socket.endpoint || "";
+                server.sseManager?.broadcast("operation_started", { operation: "deploy", stack: stack.name, endpoint });
                 await stack.deploy(socket);
                 server.sendStackList();
                 callbackResult({
@@ -29,8 +31,10 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Deployed",
                     msgi18n: true,
                 }, callback);
+                server.sseManager?.broadcast("operation_completed", { operation: "deploy", stack: stack.name, endpoint, success: true });
                 stack.joinCombinedTerminal(socket);
             } catch (e) {
+                server.sseManager?.broadcast("operation_completed", { operation: "deploy", stack: typeof name === "string" ? name : "", endpoint: socket.endpoint || "", success: false });
                 callbackError(e, callback);
             }
         });
@@ -154,17 +158,21 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     socket.emitAgent("terminalWrite", terminalName, "Dockge will disconnect briefly and reconnect automatically.\r\n");
                 }
 
+                const endpoint = socket.endpoint || "";
+                server.sseManager?.broadcast("operation_started", { operation: "start", stack: stack.name, endpoint });
                 await stack.start(socket);
                 callbackResult({
                     ok: true,
                     msg: "Started",
                     msgi18n: true,
                 }, callback);
+                server.sseManager?.broadcast("operation_completed", { operation: "start", stack: stack.name, endpoint, success: true });
                 server.sendStackList();
 
                 stack.joinCombinedTerminal(socket);
 
             } catch (e) {
+                server.sseManager?.broadcast("operation_completed", { operation: "start", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
                 callbackError(e, callback);
             }
         });
@@ -188,14 +196,18 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     return;
                 }
 
+                const endpoint = socket.endpoint || "";
+                server.sseManager?.broadcast("operation_started", { operation: "stop", stack: stack.name, endpoint });
                 await stack.stop(socket);
                 callbackResult({
                     ok: true,
                     msg: "Stopped",
                     msgi18n: true,
                 }, callback);
+                server.sseManager?.broadcast("operation_completed", { operation: "stop", stack: stack.name, endpoint, success: true });
                 server.sendStackList();
             } catch (e) {
+                server.sseManager?.broadcast("operation_completed", { operation: "stop", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
                 callbackError(e, callback);
             }
         });
@@ -218,14 +230,18 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     socket.emitAgent("terminalWrite", terminalName, "Dockge will disconnect briefly and reconnect automatically.\r\n");
                 }
 
+                const endpoint = socket.endpoint || "";
+                server.sseManager?.broadcast("operation_started", { operation: "restart", stack: stack.name, endpoint });
                 await stack.restart(socket);
                 callbackResult({
                     ok: true,
                     msg: "Restarted",
                     msgi18n: true,
                 }, callback);
+                server.sseManager?.broadcast("operation_completed", { operation: "restart", stack: stack.name, endpoint, success: true });
                 server.sendStackList();
             } catch (e) {
+                server.sseManager?.broadcast("operation_completed", { operation: "restart", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
                 callbackError(e, callback);
             }
         });
@@ -253,6 +269,8 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 let errorMessage: string | null = null;
 
                 const stack = await Stack.getStack(server, stackName);
+                const endpoint = socket.endpoint || "";
+                server.sseManager?.broadcast("operation_started", { operation: "update", stack: stackName, endpoint });
 
                 // Self-update detection: send callback before we die
                 if (await stack.isSelfStack()) {
@@ -282,6 +300,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                         msg: "Self-update initiated, agent restarting",
                         selfUpdate: true,
                     }, callback);
+                    server.sseManager?.broadcast("operation_completed", { operation: "update", stack: stackName, endpoint, success: true });
                     server.sendStackList();
                     return;
                 }
@@ -313,8 +332,10 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Updated",
                     msgi18n: true,
                 }, callback);
+                server.sseManager?.broadcast("operation_completed", { operation: "update", stack: stackName, endpoint, success: true });
                 server.sendStackList();
             } catch (e) {
+                server.sseManager?.broadcast("operation_completed", { operation: "update", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
                 callbackError(e, callback);
             }
         });

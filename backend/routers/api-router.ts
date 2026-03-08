@@ -137,6 +137,13 @@ export class ApiRouter extends Router {
         // Apply API key middleware to all other /api routes
         router.use("/api", apiKeyAuth);
 
+        // SSE endpoint — persistent connection for push events
+        router.get("/api/events", (req: Request, res: Response) => {
+            req.setTimeout(0);
+            res.setTimeout(0);
+            server.sseManager.addClient(res);
+        });
+
         // GET /api/agents — list all connected agents
         router.get("/api/agents", async (_req: Request, res: Response) => {
             try {
@@ -393,6 +400,12 @@ export class ApiRouter extends Router {
                 const startedAt = new Date().toISOString();
                 const startTime = Date.now();
 
+                server.sseManager?.broadcast("operation_started", {
+                    stack: req.params.name,
+                    endpoint: endpoint,
+                    operation: "update",
+                });
+
                 if (endpoint && endpoint !== "") {
                     // Proxy to agent
                     try {
@@ -400,6 +413,13 @@ export class ApiRouter extends Router {
                         const durationMs = Date.now() - startTime;
                         const success = !!result.ok;
                         await UpdateHistoryService.recordUpdate(req.params.name, endpoint, "api", success, null, success ? null : (result.msg as string) || null, startedAt, new Date().toISOString(), durationMs);
+                        server.sseManager?.broadcast("operation_completed", {
+                            stack: req.params.name,
+                            endpoint: endpoint,
+                            operation: "update",
+                            success,
+                            error: success ? undefined : (result.msg as string) || "Update failed on agent",
+                        });
                         if (success) {
                             res.json({ ok: true, message: `Stack '${req.params.name}' updated on ${endpoint}`, endpoint });
                         } else {
@@ -409,6 +429,13 @@ export class ApiRouter extends Router {
                         const durationMs = Date.now() - startTime;
                         const errorMsg = e instanceof Error ? e.message : String(e);
                         await UpdateHistoryService.recordUpdate(req.params.name, endpoint, "api", false, null, errorMsg, startedAt, new Date().toISOString(), durationMs);
+                        server.sseManager?.broadcast("operation_completed", {
+                            stack: req.params.name,
+                            endpoint: endpoint,
+                            operation: "update",
+                            success: false,
+                            error: errorMsg,
+                        });
                         throw e;
                     }
                     return;
@@ -422,6 +449,12 @@ export class ApiRouter extends Router {
                     await stack.selfUpdate(pruneAfterUpdate as boolean, pruneAllAfterUpdate as boolean);
                     const durationMs = Date.now() - startTime;
                     await UpdateHistoryService.recordUpdate(req.params.name, "", "api", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                    server.sseManager?.broadcast("operation_completed", {
+                        stack: req.params.name,
+                        endpoint: "",
+                        operation: "update",
+                        success: true,
+                    });
                     res.json({
                         ok: true,
                         message: `Stack '${req.params.name}' self-update initiated — Dockge will restart shortly`,
@@ -457,6 +490,13 @@ export class ApiRouter extends Router {
                 const durationMs = Date.now() - startTime;
                 await UpdateHistoryService.recordUpdate(req.params.name, "", "api", true, null, null, startedAt, new Date().toISOString(), durationMs);
 
+                server.sseManager?.broadcast("operation_completed", {
+                    stack: req.params.name,
+                    endpoint: "",
+                    operation: "update",
+                    success: true,
+                });
+
                 res.json({
                     ok: true,
                     message: `Stack '${req.params.name}' updated`,
@@ -469,6 +509,13 @@ export class ApiRouter extends Router {
                     res.status(404).json({ ok: false, error: "Stack not found" });
                 } else {
                     log.error("api", `POST /api/stacks/${req.params.name}/update error: ${e}`);
+                    server.sseManager?.broadcast("operation_completed", {
+                        stack: req.params.name,
+                        endpoint: (req.query.endpoint as string) || "",
+                        operation: "update",
+                        success: false,
+                        error: "Failed to update stack",
+                    });
                     res.status(500).json({ ok: false, error: "Failed to update stack" });
                 }
             }
@@ -654,12 +701,32 @@ export class ApiRouter extends Router {
                     return;
                 }
 
+                server.sseManager?.broadcast("operation_started", {
+                    stack: req.params.name,
+                    endpoint: endpoint,
+                    operation: "check-updates",
+                });
+
                 if (endpoint && endpoint !== "") {
                     // For remote agents, proxy via socket.io
                     try {
                         const result = await emitToAgent(server, endpoint, "checkStackUpdates", req.params.name);
+                        server.sseManager?.broadcast("operation_completed", {
+                            stack: req.params.name,
+                            endpoint: endpoint,
+                            operation: "check-updates",
+                            success: true,
+                        });
                         res.json({ ok: true, imageUpdatesAvailable: result.imageUpdatesAvailable ?? false, endpoint });
                     } catch (e) {
+                        const errorMsg = e instanceof Error ? e.message : String(e);
+                        server.sseManager?.broadcast("operation_completed", {
+                            stack: req.params.name,
+                            endpoint: endpoint,
+                            operation: "check-updates",
+                            success: false,
+                            error: errorMsg,
+                        });
                         log.error("api", `POST /api/stacks/${req.params.name}/check-updates proxy error: ${e}`);
                         res.status(502).json({ ok: false, error: "Failed to communicate with agent" });
                     }
@@ -671,6 +738,13 @@ export class ApiRouter extends Router {
                 await stack.updateImageInfos();
                 await stack.updateData();
 
+                server.sseManager?.broadcast("operation_completed", {
+                    stack: req.params.name,
+                    endpoint: "",
+                    operation: "check-updates",
+                    success: true,
+                });
+
                 res.json({
                     ok: true,
                     imageUpdatesAvailable: stack.imageUpdatesAvailable,
@@ -681,6 +755,13 @@ export class ApiRouter extends Router {
                     res.status(404).json({ ok: false, error: "Stack not found" });
                 } else {
                     log.error("api", `POST /api/stacks/${req.params.name}/check-updates error: ${e}`);
+                    server.sseManager?.broadcast("operation_completed", {
+                        stack: req.params.name,
+                        endpoint: (req.query.endpoint as string) || "",
+                        operation: "check-updates",
+                        success: false,
+                        error: "Failed to check for updates",
+                    });
                     res.status(500).json({ ok: false, error: "Failed to check for updates" });
                 }
             }
@@ -753,12 +834,20 @@ export class ApiRouter extends Router {
                         }
                         const startedAt = new Date().toISOString();
                         const startTime = Date.now();
+                        server.sseManager?.broadcast("operation_started", {
+                            stack: name,
+                            endpoint: "",
+                            operation: "update",
+                        });
                         try {
                             // Self-update detection
                             if (await stack.isSelfStack()) {
                                 await stack.selfUpdate(pruneAfterUpdate as boolean, pruneAllAfterUpdate as boolean);
                                 const durationMs = Date.now() - startTime;
                                 await UpdateHistoryService.recordUpdate(name, "", "api", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                                server.sseManager?.broadcast("operation_completed", {
+                                    stack: name, endpoint: "", operation: "update", success: true,
+                                });
                                 results.push({ name, endpoint: "", success: true, error: "self-update initiated" });
                                 continue;
                             }
@@ -778,11 +867,17 @@ export class ApiRouter extends Router {
                             await stack.updateImageInfos();
                             const durationMs = Date.now() - startTime;
                             await UpdateHistoryService.recordUpdate(name, "", "api", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                            server.sseManager?.broadcast("operation_completed", {
+                                stack: name, endpoint: "", operation: "update", success: true,
+                            });
                             results.push({ name, endpoint: "", success: true });
                         } catch (e) {
                             const durationMs = Date.now() - startTime;
                             const errorMsg = e instanceof Error ? e.message : String(e);
                             await UpdateHistoryService.recordUpdate(name, "", "api", false, null, errorMsg, startedAt, new Date().toISOString(), durationMs);
+                            server.sseManager?.broadcast("operation_completed", {
+                                stack: name, endpoint: "", operation: "update", success: false, error: errorMsg,
+                            });
                             results.push({ name, endpoint: "", success: false, error: errorMsg });
                         }
                     }
@@ -798,16 +893,26 @@ export class ApiRouter extends Router {
                             if (!agentStacks[name].isManagedByDockge) continue;
                             const startedAt = new Date().toISOString();
                             const startTime = Date.now();
+                            server.sseManager?.broadcast("operation_started", {
+                                stack: name, endpoint: ep, operation: "update",
+                            });
                             try {
                                 const updateResult = await emitToAgent(server, ep, "updateStack", name, pruneAfterUpdate, pruneAllAfterUpdate);
                                 const durationMs = Date.now() - startTime;
                                 const success = !!updateResult.ok;
                                 await UpdateHistoryService.recordUpdate(name, ep, "api", success, null, success ? null : (updateResult.msg as string) || null, startedAt, new Date().toISOString(), durationMs);
+                                server.sseManager?.broadcast("operation_completed", {
+                                    stack: name, endpoint: ep, operation: "update", success,
+                                    error: success ? undefined : (updateResult.msg as string) || "Update failed on agent",
+                                });
                                 results.push({ name, endpoint: ep, success });
                             } catch (e) {
                                 const durationMs = Date.now() - startTime;
                                 const errorMsg = e instanceof Error ? e.message : String(e);
                                 await UpdateHistoryService.recordUpdate(name, ep, "api", false, null, errorMsg, startedAt, new Date().toISOString(), durationMs);
+                                server.sseManager?.broadcast("operation_completed", {
+                                    stack: name, endpoint: ep, operation: "update", success: false, error: errorMsg,
+                                });
                                 results.push({ name, endpoint: ep, success: false, error: errorMsg });
                             }
                         }
@@ -835,6 +940,11 @@ export class ApiRouter extends Router {
                         await updateAgentStacks(agent.endpoint);
                     }
                 }
+
+                const updated = results.filter(r => r.success && !r.error?.includes("skipped")).map(r => r.name);
+                const failed = results.filter(r => !r.success).map(r => r.name);
+                const skipped = results.filter(r => r.success && r.error?.includes("skipped")).map(r => r.name);
+                server.sseManager?.broadcast("scheduler_run_completed", { updated, failed, skipped });
 
                 res.json({ ok: true, results });
             } catch (e) {
@@ -922,6 +1032,9 @@ export class ApiRouter extends Router {
                 for (const { stackName, endpoint } of stacks) {
                     const startedAt = new Date().toISOString();
                     const startTime = Date.now();
+                    server.sseManager?.broadcast("operation_started", {
+                        stack: stackName, endpoint, operation: "update",
+                    });
                     try {
                         if (endpoint !== "") {
                             // Remote agent
@@ -929,6 +1042,10 @@ export class ApiRouter extends Router {
                             const durationMs = Date.now() - startTime;
                             const success = !!updateResult.ok;
                             await UpdateHistoryService.recordUpdate(stackName, endpoint, "api-trigger", success, null, success ? null : (updateResult.msg as string) || null, startedAt, new Date().toISOString(), durationMs);
+                            server.sseManager?.broadcast("operation_completed", {
+                                stack: stackName, endpoint, operation: "update", success,
+                                error: success ? undefined : (updateResult.msg as string) || "Update failed on agent",
+                            });
                             results.push({ stackName, endpoint, success });
                         } else {
                             // Local
@@ -939,6 +1056,9 @@ export class ApiRouter extends Router {
                                 await stack.selfUpdate(pruneAfterUpdate as boolean, pruneAllAfterUpdate as boolean);
                                 const durationMs = Date.now() - startTime;
                                 await UpdateHistoryService.recordUpdate(stackName, endpoint, "api-trigger", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                                server.sseManager?.broadcast("operation_completed", {
+                                    stack: stackName, endpoint, operation: "update", success: true,
+                                });
                                 results.push({ stackName, endpoint, success: true });
                                 continue;
                             }
@@ -955,15 +1075,25 @@ export class ApiRouter extends Router {
                             }
                             const durationMs = Date.now() - startTime;
                             await UpdateHistoryService.recordUpdate(stackName, endpoint, "api-trigger", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                            server.sseManager?.broadcast("operation_completed", {
+                                stack: stackName, endpoint, operation: "update", success: true,
+                            });
                             results.push({ stackName, endpoint, success: true });
                         }
                     } catch (e) {
                         const durationMs = Date.now() - startTime;
                         const errorMsg = e instanceof Error ? e.message : String(e);
                         await UpdateHistoryService.recordUpdate(stackName, endpoint, "api-trigger", false, null, errorMsg, startedAt, new Date().toISOString(), durationMs);
+                        server.sseManager?.broadcast("operation_completed", {
+                            stack: stackName, endpoint, operation: "update", success: false, error: errorMsg,
+                        });
                         results.push({ stackName, endpoint, success: false, error: errorMsg });
                     }
                 }
+
+                const updated = results.filter(r => r.success).map(r => r.stackName);
+                const failed = results.filter(r => !r.success).map(r => r.stackName);
+                server.sseManager?.broadcast("scheduler_run_completed", { updated, failed, skipped: [] });
 
                 res.json({ ok: true, results });
             } catch (e) {

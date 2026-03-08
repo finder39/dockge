@@ -67,6 +67,9 @@ export class AutoUpdateScheduler {
         this.running = true;
         log.info("scheduler", "Starting auto-update run");
 
+        const updated: string[] = [];
+        const failed: string[] = [];
+
         try {
             const pruneAfterUpdate = await Settings.get("defaultPruneAfterUpdate")
                 ?? await Settings.get("schedulerPruneAfterUpdate") ?? true;
@@ -80,7 +83,12 @@ export class AutoUpdateScheduler {
 
             // Update local stacks
             for (const { stackName } of localStacks) {
-                await this.updateStack(stackName, "", pruneAfterUpdate, pruneAllAfterUpdate);
+                const ok = await this.updateStack(stackName, "", pruneAfterUpdate, pruneAllAfterUpdate);
+                if (ok === true) {
+                    updated.push(stackName);
+                } else if (ok === false) {
+                    failed.push(stackName);
+                }
             }
 
             // Update remote stacks via agent socket
@@ -94,7 +102,12 @@ export class AutoUpdateScheduler {
 
             for (const [endpoint, stackNames] of byEndpoint) {
                 for (const stackName of stackNames) {
-                    await this.updateStackViaAgent(stackName, endpoint, pruneAfterUpdate, pruneAllAfterUpdate);
+                    const ok = await this.updateStackViaAgent(stackName, endpoint, pruneAfterUpdate, pruneAllAfterUpdate);
+                    if (ok === true) {
+                        updated.push(stackName);
+                    } else if (ok === false) {
+                        failed.push(stackName);
+                    }
                 }
             }
 
@@ -109,12 +122,18 @@ export class AutoUpdateScheduler {
         } finally {
             this.running = false;
             log.info("scheduler", "Auto-update run completed");
+            this.server.sseManager?.broadcast("scheduler_run_completed", {
+                updated, failed, nextRun: this.getNextRunTime() ?? null,
+            });
         }
     }
 
-    private async updateStack(stackName: string, endpoint: string, pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean) {
+    private async updateStack(stackName: string, endpoint: string, pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean): Promise<boolean | null> {
         const startedAt = new Date().toISOString();
         const startTime = Date.now();
+        this.server.sseManager?.broadcast("operation_started", {
+            stack: stackName, endpoint, operation: "update",
+        });
         let success = true;
         let errorMessage: string | null = null;
 
@@ -126,7 +145,7 @@ export class AutoUpdateScheduler {
             await stack.updateData();
             if (!stack.isStarted) {
                 log.info("scheduler", `Skipping stack ${stackName} (not running)`);
-                return;
+                return null;
             }
 
             // Self-update detection
@@ -142,7 +161,10 @@ export class AutoUpdateScheduler {
                     stackName, endpoint, "scheduled", true, output, null,
                     startedAt, completedAt, durationMs
                 );
-                return;
+                this.server.sseManager?.broadcast("operation_completed", {
+                    stack: stackName, endpoint, operation: "update", success: true,
+                });
+                return true;
             }
 
             // Run docker compose pull && up -d directly (no terminal/socket needed)
@@ -188,11 +210,18 @@ export class AutoUpdateScheduler {
             stackName, endpoint, "scheduled", success, output || null, errorMessage,
             startedAt, completedAt, durationMs
         );
+        this.server.sseManager?.broadcast("operation_completed", {
+            stack: stackName, endpoint, operation: "update", success,
+        });
+        return success;
     }
 
-    private async updateStackViaAgent(stackName: string, endpoint: string, pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean) {
+    private async updateStackViaAgent(stackName: string, endpoint: string, pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean): Promise<boolean> {
         const startedAt = new Date().toISOString();
         const startTime = Date.now();
+        this.server.sseManager?.broadcast("operation_started", {
+            stack: stackName, endpoint, operation: "update",
+        });
         let success = true;
         let errorMessage: string | null = null;
 
@@ -223,5 +252,9 @@ export class AutoUpdateScheduler {
             stackName, endpoint, "scheduled", success, null, errorMessage,
             startedAt, completedAt, durationMs
         );
+        this.server.sseManager?.broadcast("operation_completed", {
+            stack: stackName, endpoint, operation: "update", success,
+        });
+        return success;
     }
 }
