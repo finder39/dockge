@@ -108,6 +108,7 @@ case "${1:-}" in
     info "Cleaning up data..."
     rm -rf primary/data primary/stacks agent-data
     docker ps -a --filter "name=dockge-self-updater" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+    docker ps -a --filter "name=dockge-self-deploy" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
     docker network rm dockge-test-net 2>/dev/null || true
     pass "Cleanup complete"
     ;;
@@ -124,8 +125,9 @@ case "${1:-}" in
     echo "=== Containers ==="
     docker ps -a --filter "name=dockge-test" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
     echo ""
-    echo "=== Self-updater containers ==="
+    echo "=== Self-updater/deploy containers ==="
     docker ps -a --filter "name=dockge-self-updater" --format "table {{.Names}}\t{{.Status}}"
+    docker ps -a --filter "name=dockge-self-deploy" --format "table {{.Names}}\t{{.Status}}"
     echo ""
     echo "=== Agent API status ==="
     api GET "$PRIMARY_URL/api/agents/status" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "(primary not reachable)"
@@ -143,6 +145,7 @@ case "${1:-}" in
     docker compose -f primary/compose.yaml down 2>/dev/null || true
     rm -rf primary/data primary/stacks agent-data
     docker ps -a --filter "name=dockge-self-updater" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+    docker ps -a --filter "name=dockge-self-deploy" --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
     docker network rm dockge-test-net 2>/dev/null || true
     sleep 1
 
@@ -360,12 +363,69 @@ for r in data.get('results', []):
         exit 1
     fi
 
-    # Step 6: Get agent container ID before update
-    AGENT_CID_BEFORE=$(docker inspect --format '{{.Id}}' dockge-test-agent 2>/dev/null | head -c 12)
-    info "Step 6: Agent container ID before update: $AGENT_CID_BEFORE"
+    # Step 6: Test self-stack detection via REST API (local path)
+    info "Step 6: Testing self-stack detection via agent's local REST API..."
 
-    # Step 7: Trigger update on agent's self-stack
-    info "Step 7: Triggering update on agent's 'agent' stack..."
+    # Step 6a: Test /api/stacks/:name/update on agent's own stack (local, no endpoint)
+    info "Step 6a: POST /api/stacks/agent/update on agent (local self-stack)..."
+    SELF_UPDATE_RESULT=$(curl -sf -X POST "$AGENT_URL/api/stacks/agent/update" \
+      -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" 2>&1) || true
+    info "  Response: $SELF_UPDATE_RESULT"
+    if echo "$SELF_UPDATE_RESULT" | grep -qi "self-update"; then
+        pass "API update detected self-stack and initiated self-update"
+    else
+        fail "API update did not detect self-stack: $SELF_UPDATE_RESULT"
+        exit 1
+    fi
+
+    # Wait for agent to come back after self-update
+    sleep 15
+    if wait_for_healthy "$AGENT_URL" "Agent (post-API-self-update)" 60; then
+        pass "Agent came back after API self-update"
+    else
+        fail "Agent did not come back after API self-update"
+        docker logs dockge-test-agent --tail 20 2>&1
+        exit 1
+    fi
+    sleep 3
+
+    # Step 6b: Test /api/update-all includes self-stack safely
+    info "Step 6b: POST /api/update-all on agent (includes self-stack)..."
+    UPDATE_ALL_AGENT=$(curl -sf -X POST "$AGENT_URL/api/update-all?endpoint=" \
+      -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" 2>&1) || true
+    info "  Response: $UPDATE_ALL_AGENT"
+    SELF_IN_RESULTS=$(echo "$UPDATE_ALL_AGENT" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for r in data.get('results', []):
+    if r.get('name') == 'agent':
+        print(r.get('error', r.get('success', '')))
+        break
+" 2>/dev/null) || true
+    if echo "$SELF_IN_RESULTS" | grep -qi "self-update\|true\|True"; then
+        pass "update-all handled self-stack safely"
+    else
+        fail "update-all did not handle self-stack: $SELF_IN_RESULTS"
+        exit 1
+    fi
+
+    # Wait for agent to come back after update-all self-update
+    sleep 15
+    if wait_for_healthy "$AGENT_URL" "Agent (post-update-all)" 60; then
+        pass "Agent came back after update-all self-update"
+    else
+        fail "Agent did not come back after update-all"
+        docker logs dockge-test-agent --tail 20 2>&1
+        exit 1
+    fi
+    sleep 3
+
+    # Step 7: Get agent container ID before proxied update
+    AGENT_CID_BEFORE=$(docker inspect --format '{{.Id}}' dockge-test-agent 2>/dev/null | head -c 12)
+    info "Step 7: Agent container ID before proxied update: $AGENT_CID_BEFORE"
+
+    # Step 7a: Trigger update on agent via primary (proxied path — already worked)
+    info "Step 7a: Triggering proxied update on agent's 'agent' stack..."
     UPDATE_RESULT=$(api POST "$PRIMARY_URL/api/stacks/agent/update?endpoint=$AGENT_ENDPOINT" 2>&1) || true
     info "  Update response: $UPDATE_RESULT"
 
