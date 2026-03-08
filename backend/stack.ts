@@ -303,6 +303,11 @@ export class Stack {
     }
 
     async deploy(socket : DockgeSocket) : Promise<number> {
+        if (await this.isSelfStack()) {
+            await this.selfDeploy();
+            return 0;
+        }
+
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
         let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ ...this.composeArgs, "up", "-d", "--remove-orphans" ], this.path);
         if (exitCode !== 0) {
@@ -630,6 +635,11 @@ export class Stack {
     }
 
     async start(socket: DockgeSocket) {
+        if (await this.isSelfStack()) {
+            await this.selfDeploy();
+            return 0;
+        }
+
         const terminalName = getComposeTerminalName(socket.endpoint, this.name);
         let exitCode = await Terminal.exec(this.server, socket, terminalName, "docker", [ ...this.composeArgs, "up", "-d", "--remove-orphans" ], this.path);
         if (exitCode !== 0) {
@@ -758,6 +768,25 @@ export class Stack {
      */
     async getHostStackPath(): Promise<string> {
         return this.hostPath;
+    }
+
+    /**
+     * Perform a self-deploy by spawning a sidecar container that runs
+     * `docker compose up -d` after this Dockge instance is killed.
+     * Used by deploy and start when acting on Dockge's own stack.
+     */
+    async selfDeploy(): Promise<void> {
+        const hostPath = await this.getHostStackPath();
+        const script = `sleep 5 && cd ${hostPath} && docker compose up -d --remove-orphans`;
+
+        await childProcessAsync.spawn("docker", [
+            "run", "-d", "--rm",
+            "--name", `dockge-self-deploy-${Date.now()}`,
+            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            "-v", `${hostPath}:${hostPath}`,
+            "docker:cli",
+            "sh", "-c", script,
+        ], { encoding: "utf-8" });
     }
 
     /**

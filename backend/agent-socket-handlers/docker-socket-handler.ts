@@ -14,6 +14,14 @@ export class DockerSocketHandler extends AgentSocketHandler {
             try {
                 checkLogin(socket);
                 const stack = await this.saveStack(server, name, composeYAML, composeENV, isAdd);
+
+                if (await stack.isSelfStack()) {
+                    const terminalName = getComposeTerminalName(socket.endpoint, stack.name);
+                    socket.emitAgent("terminalWrite", terminalName, "\r\n\x1b[1;33m⚠ Self-deploy detected\x1b[0m\r\n");
+                    socket.emitAgent("terminalWrite", terminalName, "This stack contains Dockge itself.\r\n");
+                    socket.emitAgent("terminalWrite", terminalName, "Dockge will disconnect briefly and reconnect automatically.\r\n");
+                }
+
                 await stack.deploy(socket);
                 server.sendStackList();
                 callbackResult({
@@ -138,6 +146,14 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const stack = await Stack.getStack(server, stackName);
+
+                if (await stack.isSelfStack()) {
+                    const terminalName = getComposeTerminalName(socket.endpoint, stackName);
+                    socket.emitAgent("terminalWrite", terminalName, "\r\n\x1b[1;33m⚠ Self-start detected\x1b[0m\r\n");
+                    socket.emitAgent("terminalWrite", terminalName, "This stack contains Dockge itself.\r\n");
+                    socket.emitAgent("terminalWrite", terminalName, "Dockge will disconnect briefly and reconnect automatically.\r\n");
+                }
+
                 await stack.start(socket);
                 callbackResult({
                     ok: true,
