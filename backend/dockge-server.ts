@@ -828,6 +828,7 @@ export class DockgeServer {
 
         // TODO: Close all terminals?
 
+        this.sseManager.stopHeartbeat();
         this.serverAgentManager.disconnectAll();
         await Database.close();
         Settings.stopCacheCleaner();

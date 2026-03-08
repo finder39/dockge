@@ -400,13 +400,12 @@ export class ApiRouter extends Router {
                 const startedAt = new Date().toISOString();
                 const startTime = Date.now();
 
-                server.sseManager?.broadcast("operation_started", {
-                    stack: req.params.name,
-                    endpoint: endpoint,
-                    operation: "update",
-                });
-
                 if (endpoint && endpoint !== "") {
+                    server.sseManager?.broadcast("operation_started", {
+                        stack: req.params.name,
+                        endpoint: endpoint,
+                        operation: "update",
+                    });
                     // Proxy to agent
                     try {
                         const result = await emitToAgent(server, endpoint, "updateStack", req.params.name, pruneAfterUpdate, pruneAllAfterUpdate);
@@ -443,6 +442,12 @@ export class ApiRouter extends Router {
 
                 const stack = await Stack.getStack(server, req.params.name, false);
                 await stack.updateData();
+
+                server.sseManager?.broadcast("operation_started", {
+                    stack: req.params.name,
+                    endpoint: "",
+                    operation: "update",
+                });
 
                 // Self-update detection: if this stack contains Dockge itself, use the sidecar approach
                 if (await stack.isSelfStack()) {
