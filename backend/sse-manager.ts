@@ -71,6 +71,24 @@ export class SSEManager {
     }
 
     /**
+     * Broadcast an operation_started event
+     */
+    broadcastOperationStarted(stack : string, endpoint : string, operation : string) : void {
+        this.broadcast("operation_started", { stack, endpoint, operation });
+    }
+
+    /**
+     * Broadcast an operation_completed event
+     */
+    broadcastOperationCompleted(stack : string, endpoint : string, operation : string, success : boolean, error? : string) : void {
+        const data : Record<string, unknown> = { stack, endpoint, operation, success };
+        if (error) {
+            data.error = error;
+        }
+        this.broadcast("operation_completed", data);
+    }
+
+    /**
      * Send an event to a single client
      * @param res Express response object
      * @param event Event name

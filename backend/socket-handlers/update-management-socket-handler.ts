@@ -35,6 +35,12 @@ export class UpdateManagementSocketHandler extends SocketHandler {
                     msgi18n: true,
                 });
 
+                server.sseManager?.broadcast("auto_update_changed", {
+                    stack: stackName,
+                    endpoint: endpoint,
+                    enabled: enabled,
+                });
+
                 server.sendStackList();
             } catch (e) {
                 callbackError(e, callback);
@@ -188,15 +194,15 @@ export class UpdateManagementSocketHandler extends SocketHandler {
                     msgi18n: true,
                 });
 
-                server.sseManager?.broadcast("operation_started", { operation: "check-updates", stack: stackName, endpoint });
+                server.sseManager?.broadcastOperationStarted(stackName, endpoint, "check-updates");
 
                 if (endpoint !== "" && endpoint !== socket.endpoint) {
                     // Proxy to agent — fire and forget, agent will update its stack list
                     socket.instanceManager.emitToEndpoint(endpoint, "checkStackUpdates", stackName, () => {
-                        server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: true });
+                        server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "check-updates", true);
                         server.sendStackList();
                     }).catch((e: unknown) => {
-                        server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: false });
+                        server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "check-updates", false);
                         log.warn("checkStackUpdates", `Agent check failed for ${stackName} on ${endpoint}: ${e}`);
                     });
                 } else {
@@ -207,10 +213,10 @@ export class UpdateManagementSocketHandler extends SocketHandler {
                             await stack.updateData();
                             await stack.updateImageInfos();
                             await stack.updateData();
-                            server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: true });
+                            server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "check-updates", true);
                             server.sendStackList();
                         } catch (e) {
-                            server.sseManager?.broadcast("operation_completed", { operation: "check-updates", stack: stackName, endpoint, success: false });
+                            server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "check-updates", false);
                             log.warn("checkStackUpdates", `Check failed for ${stackName}: ${e}`);
                         }
                     })();

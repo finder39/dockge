@@ -131,9 +131,7 @@ export class AutoUpdateScheduler {
     private async updateStack(stackName: string, endpoint: string, pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean): Promise<boolean | null> {
         const startedAt = new Date().toISOString();
         const startTime = Date.now();
-        this.server.sseManager?.broadcast("operation_started", {
-            stack: stackName, endpoint, operation: "update",
-        });
+        this.server.sseManager?.broadcastOperationStarted(stackName, endpoint, "update");
         let success = true;
         let errorMessage: string | null = null;
 
@@ -161,9 +159,7 @@ export class AutoUpdateScheduler {
                     stackName, endpoint, "scheduled", true, output, null,
                     startedAt, completedAt, durationMs
                 );
-                this.server.sseManager?.broadcast("operation_completed", {
-                    stack: stackName, endpoint, operation: "update", success: true,
-                });
+                this.server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", true);
                 return true;
             }
 
@@ -210,18 +206,14 @@ export class AutoUpdateScheduler {
             stackName, endpoint, "scheduled", success, output || null, errorMessage,
             startedAt, completedAt, durationMs
         );
-        this.server.sseManager?.broadcast("operation_completed", {
-            stack: stackName, endpoint, operation: "update", success,
-        });
+        this.server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", success);
         return success;
     }
 
     private async updateStackViaAgent(stackName: string, endpoint: string, pruneAfterUpdate: boolean, pruneAllAfterUpdate: boolean): Promise<boolean> {
         const startedAt = new Date().toISOString();
         const startTime = Date.now();
-        this.server.sseManager?.broadcast("operation_started", {
-            stack: stackName, endpoint, operation: "update",
-        });
+        this.server.sseManager?.broadcastOperationStarted(stackName, endpoint, "update");
         let success = true;
         let errorMessage: string | null = null;
 
@@ -252,9 +244,7 @@ export class AutoUpdateScheduler {
             stackName, endpoint, "scheduled", success, null, errorMessage,
             startedAt, completedAt, durationMs
         );
-        this.server.sseManager?.broadcast("operation_completed", {
-            stack: stackName, endpoint, operation: "update", success,
-        });
+        this.server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", success);
         return success;
     }
 }

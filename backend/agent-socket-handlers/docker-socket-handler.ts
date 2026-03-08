@@ -23,7 +23,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const endpoint = socket.endpoint || "";
-                server.sseManager?.broadcast("operation_started", { operation: "deploy", stack: stack.name, endpoint });
+                server.sseManager?.broadcastOperationStarted(stack.name, endpoint, "deploy");
                 await stack.deploy(socket);
                 server.sendStackList();
                 callbackResult({
@@ -31,10 +31,10 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Deployed",
                     msgi18n: true,
                 }, callback);
-                server.sseManager?.broadcast("operation_completed", { operation: "deploy", stack: stack.name, endpoint, success: true });
+                server.sseManager?.broadcastOperationCompleted(stack.name, endpoint, "deploy", true);
                 stack.joinCombinedTerminal(socket);
             } catch (e) {
-                server.sseManager?.broadcast("operation_completed", { operation: "deploy", stack: typeof name === "string" ? name : "", endpoint: socket.endpoint || "", success: false });
+                server.sseManager?.broadcastOperationCompleted(typeof name === "string" ? name : "", socket.endpoint || "", "deploy", false);
                 callbackError(e, callback);
             }
         });
@@ -61,7 +61,9 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     throw new ValidationError("Name must be a string");
                 }
                 const stack = await Stack.getStack(server, name);
+                const endpoint = socket.endpoint || "";
 
+                server.sseManager?.broadcastOperationStarted(stack.name, endpoint, "delete");
                 try {
                     await stack.delete(socket);
                 } catch (e) {
@@ -75,8 +77,10 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Deleted",
                     msgi18n: true,
                 }, callback);
+                server.sseManager?.broadcastOperationCompleted(stack.name, endpoint, "delete", true);
 
             } catch (e) {
+                server.sseManager?.broadcastOperationCompleted(typeof name === "string" ? name : "", socket.endpoint || "", "delete", false);
                 callbackError(e, callback);
             }
         });
@@ -159,20 +163,20 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const endpoint = socket.endpoint || "";
-                server.sseManager?.broadcast("operation_started", { operation: "start", stack: stack.name, endpoint });
+                server.sseManager?.broadcastOperationStarted(stack.name, endpoint, "start");
                 await stack.start(socket);
                 callbackResult({
                     ok: true,
                     msg: "Started",
                     msgi18n: true,
                 }, callback);
-                server.sseManager?.broadcast("operation_completed", { operation: "start", stack: stack.name, endpoint, success: true });
+                server.sseManager?.broadcastOperationCompleted(stack.name, endpoint, "start", true);
                 server.sendStackList();
 
                 stack.joinCombinedTerminal(socket);
 
             } catch (e) {
-                server.sseManager?.broadcast("operation_completed", { operation: "start", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
+                server.sseManager?.broadcastOperationCompleted(typeof stackName === "string" ? stackName : "", socket.endpoint || "", "start", false);
                 callbackError(e, callback);
             }
         });
@@ -197,17 +201,17 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const endpoint = socket.endpoint || "";
-                server.sseManager?.broadcast("operation_started", { operation: "stop", stack: stack.name, endpoint });
+                server.sseManager?.broadcastOperationStarted(stack.name, endpoint, "stop");
                 await stack.stop(socket);
                 callbackResult({
                     ok: true,
                     msg: "Stopped",
                     msgi18n: true,
                 }, callback);
-                server.sseManager?.broadcast("operation_completed", { operation: "stop", stack: stack.name, endpoint, success: true });
+                server.sseManager?.broadcastOperationCompleted(stack.name, endpoint, "stop", true);
                 server.sendStackList();
             } catch (e) {
-                server.sseManager?.broadcast("operation_completed", { operation: "stop", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
+                server.sseManager?.broadcastOperationCompleted(typeof stackName === "string" ? stackName : "", socket.endpoint || "", "stop", false);
                 callbackError(e, callback);
             }
         });
@@ -231,17 +235,17 @@ export class DockerSocketHandler extends AgentSocketHandler {
                 }
 
                 const endpoint = socket.endpoint || "";
-                server.sseManager?.broadcast("operation_started", { operation: "restart", stack: stack.name, endpoint });
+                server.sseManager?.broadcastOperationStarted(stack.name, endpoint, "restart");
                 await stack.restart(socket);
                 callbackResult({
                     ok: true,
                     msg: "Restarted",
                     msgi18n: true,
                 }, callback);
-                server.sseManager?.broadcast("operation_completed", { operation: "restart", stack: stack.name, endpoint, success: true });
+                server.sseManager?.broadcastOperationCompleted(stack.name, endpoint, "restart", true);
                 server.sendStackList();
             } catch (e) {
-                server.sseManager?.broadcast("operation_completed", { operation: "restart", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
+                server.sseManager?.broadcastOperationCompleted(typeof stackName === "string" ? stackName : "", socket.endpoint || "", "restart", false);
                 callbackError(e, callback);
             }
         });
@@ -270,7 +274,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
 
                 const stack = await Stack.getStack(server, stackName);
                 const endpoint = socket.endpoint || "";
-                server.sseManager?.broadcast("operation_started", { operation: "update", stack: stackName, endpoint });
+                server.sseManager?.broadcastOperationStarted(stackName, endpoint, "update");
 
                 // Self-update detection: send callback before we die
                 if (await stack.isSelfStack()) {
@@ -300,7 +304,7 @@ export class DockerSocketHandler extends AgentSocketHandler {
                         msg: "Self-update initiated, agent restarting",
                         selfUpdate: true,
                     }, callback);
-                    server.sseManager?.broadcast("operation_completed", { operation: "update", stack: stackName, endpoint, success: true });
+                    server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", true);
                     server.sendStackList();
                     return;
                 }
@@ -332,10 +336,10 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     msg: "Updated",
                     msgi18n: true,
                 }, callback);
-                server.sseManager?.broadcast("operation_completed", { operation: "update", stack: stackName, endpoint, success: true });
+                server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", true);
                 server.sendStackList();
             } catch (e) {
-                server.sseManager?.broadcast("operation_completed", { operation: "update", stack: typeof stackName === "string" ? stackName : "", endpoint: socket.endpoint || "", success: false });
+                server.sseManager?.broadcastOperationCompleted(typeof stackName === "string" ? stackName : "", socket.endpoint || "", "update", false);
                 callbackError(e, callback);
             }
         });
@@ -359,14 +363,18 @@ export class DockerSocketHandler extends AgentSocketHandler {
                     return;
                 }
 
+                const endpoint = socket.endpoint || "";
+                server.sseManager?.broadcastOperationStarted(stack.name, endpoint, "down");
                 await stack.down(socket);
                 callbackResult({
                     ok: true,
                     msg: "Downed",
                     msgi18n: true,
                 }, callback);
+                server.sseManager?.broadcastOperationCompleted(stack.name, endpoint, "down", true);
                 server.sendStackList();
             } catch (e) {
+                server.sseManager?.broadcastOperationCompleted(typeof stackName === "string" ? stackName : "", socket.endpoint || "", "down", false);
                 callbackError(e, callback);
             }
         });
