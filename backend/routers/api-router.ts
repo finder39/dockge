@@ -417,6 +417,19 @@ export class ApiRouter extends Router {
                 const stack = await Stack.getStack(server, req.params.name, false);
                 await stack.updateData();
 
+                // Self-update detection: if this stack contains Dockge itself, use the sidecar approach
+                if (await stack.isSelfStack()) {
+                    await stack.selfUpdate(pruneAfterUpdate as boolean, pruneAllAfterUpdate as boolean);
+                    const durationMs = Date.now() - startTime;
+                    await UpdateHistoryService.recordUpdate(req.params.name, "", "api", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                    res.json({
+                        ok: true,
+                        message: `Stack '${req.params.name}' self-update initiated — Dockge will restart shortly`,
+                        endpoint: "",
+                    });
+                    return;
+                }
+
                 const pullResult = await childProcessAsync.spawn("docker", [...stack.composeArgs, "pull"], {
                     cwd: stack.path,
                     encoding: "utf-8",
@@ -741,6 +754,15 @@ export class ApiRouter extends Router {
                         const startedAt = new Date().toISOString();
                         const startTime = Date.now();
                         try {
+                            // Self-update detection
+                            if (await stack.isSelfStack()) {
+                                await stack.selfUpdate(pruneAfterUpdate as boolean, pruneAllAfterUpdate as boolean);
+                                const durationMs = Date.now() - startTime;
+                                await UpdateHistoryService.recordUpdate(name, "", "api", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                                results.push({ name, endpoint: "", success: true, error: "self-update initiated" });
+                                continue;
+                            }
+
                             await childProcessAsync.spawn("docker", [...stack.composeArgs, "pull"], { cwd: stack.path, encoding: "utf-8" });
                             await stack.updateData();
                             if (stack.isStarted) {
@@ -911,6 +933,16 @@ export class ApiRouter extends Router {
                         } else {
                             // Local
                             const stack = await Stack.getStack(server, stackName, false);
+
+                            // Self-update detection
+                            if (await stack.isSelfStack()) {
+                                await stack.selfUpdate(pruneAfterUpdate as boolean, pruneAllAfterUpdate as boolean);
+                                const durationMs = Date.now() - startTime;
+                                await UpdateHistoryService.recordUpdate(stackName, endpoint, "api-trigger", true, null, null, startedAt, new Date().toISOString(), durationMs);
+                                results.push({ stackName, endpoint, success: true });
+                                continue;
+                            }
+
                             await childProcessAsync.spawn("docker", [...stack.composeArgs, "pull"], { cwd: stack.path, encoding: "utf-8" });
                             await stack.updateData();
                             if (stack.isStarted) {
