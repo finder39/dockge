@@ -1,4 +1,5 @@
 import { io, Socket as SocketClient } from "socket.io-client";
+import { EventEmitter } from "events";
 import { log } from "./log";
 import { Agent } from "./models/agent";
 import { LooseObject, sleep } from "../common/util-common";
@@ -17,6 +18,7 @@ export class ServerAgentManager {
     protected agentLoggedInList: Record<string, boolean> = {};
     protected agentVersionList: Record<string, string> = {};
     protected _firstConnectTime: Dayjs = dayjs();
+    public events = new EventEmitter();
 
     get firstConnectTime(): Dayjs {
         return this._firstConnectTime;
@@ -54,6 +56,7 @@ export class ServerAgentManager {
                 if (res.ok) {
                     log.info("server-agent-manager", "Logged in to the socket server: " + endpoint);
                     this.agentLoggedInList[endpoint] = true;
+                    this.events.emit("agentReconnected", endpoint);
                 } else {
                     log.error("server-agent-manager", "Failed to login to the socket server: " + endpoint);
                     this.agentLoggedInList[endpoint] = false;
@@ -68,6 +71,7 @@ export class ServerAgentManager {
         client.on("disconnect", () => {
             log.info("server-agent-manager", "Disconnected from the socket server: " + endpoint);
             this.agentLoggedInList[endpoint] = false;
+            this.events.emit("agentDisconnected", endpoint);
         });
 
         client.on("info", (res: LooseObject) => {
@@ -150,5 +154,47 @@ export class ServerAgentManager {
     isConnected(endpoint: string): boolean {
         const client = this.agentSocketList[endpoint];
         return !!(client && client.connected && this.agentLoggedInList[endpoint]);
+    }
+
+    /**
+     * Wait for an agent to disconnect and reconnect (e.g. after self-update).
+     * Returns a promise that resolves when the agent comes back, or rejects on timeout.
+     */
+    waitForReconnect(endpoint: string, timeoutMs: number = 120000): Promise<void> {
+        return new Promise((resolve, reject) => {
+            let sawDisconnect = false;
+            const timer = setTimeout(() => {
+                cleanup();
+                reject(new Error(`Timed out waiting for agent ${endpoint} to reconnect`));
+            }, timeoutMs);
+
+            const onDisconnect = (ep: string) => {
+                if (ep === endpoint) {
+                    sawDisconnect = true;
+                    log.debug("server-agent-manager", `Agent ${endpoint} disconnected (waiting for reconnect)`);
+                }
+            };
+
+            const onReconnect = (ep: string) => {
+                if (ep === endpoint && sawDisconnect) {
+                    cleanup();
+                    resolve();
+                }
+            };
+
+            const cleanup = () => {
+                clearTimeout(timer);
+                this.events.removeListener("agentDisconnected", onDisconnect);
+                this.events.removeListener("agentReconnected", onReconnect);
+            };
+
+            this.events.on("agentDisconnected", onDisconnect);
+            this.events.on("agentReconnected", onReconnect);
+
+            // If already disconnected, mark it
+            if (!this.isConnected(endpoint)) {
+                sawDisconnect = true;
+            }
+        });
     }
 }

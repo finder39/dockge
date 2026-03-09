@@ -217,11 +217,13 @@ export class AutoUpdateScheduler {
         let success = true;
         let errorMessage: string | null = null;
 
+        let isSelfUpdate = false;
         try {
             await new Promise<void>((resolve, reject) => {
                 this.server.serverAgentManager.emitToEndpoint(endpoint, "updateStack", stackName, pruneAfterUpdate, pruneAllAfterUpdate, (result: { ok?: boolean; msg?: string; selfUpdate?: boolean }) => {
                     if (result?.ok) {
                         if (result.selfUpdate) {
+                            isSelfUpdate = true;
                             log.info("scheduler", `Agent ${endpoint} is self-updating stack ${stackName}, will restart`);
                         }
                         resolve();
@@ -244,7 +246,27 @@ export class AutoUpdateScheduler {
             stackName, endpoint, "scheduled", success, null, errorMessage,
             startedAt, completedAt, durationMs
         );
-        this.server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", success);
+
+        if (isSelfUpdate) {
+            // Don't broadcast completion yet — agent is restarting.
+            // Poll until it reconnects, then broadcast.
+            this.waitForAgentReconnect(endpoint, stackName, 120000);
+        } else {
+            this.server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", success);
+        }
         return success;
+    }
+
+    /**
+     * Wait for an agent to reconnect after a self-update, then broadcast operation_completed.
+     */
+    private waitForAgentReconnect(endpoint: string, stackName: string, timeoutMs: number) {
+        this.server.serverAgentManager.waitForReconnect(endpoint, timeoutMs).then(() => {
+            log.info("scheduler", `Agent ${endpoint} reconnected after self-update of '${stackName}'`);
+            this.server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", true);
+        }).catch(() => {
+            log.warn("scheduler", `Timed out waiting for agent ${endpoint} to reconnect after self-update of '${stackName}'`);
+            this.server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", true, "Agent reconnection timed out but update was initiated");
+        });
     }
 }

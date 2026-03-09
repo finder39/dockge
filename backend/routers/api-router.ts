@@ -109,19 +109,43 @@ function findBrowserSocket(server: DockgeServer): DockgeSocket | null {
  * Emit an event to a remote agent via the server's persistent agent manager.
  * Returns a promise that resolves with the callback result.
  */
+function emitToAgent(server: DockgeServer, endpoint: string, eventName: string, ...args: unknown[]): Promise<Record<string, unknown>>;
+function emitToAgent(server: DockgeServer, endpoint: string, eventName: string, timeoutMs: number, ...args: unknown[]): Promise<Record<string, unknown>>;
 function emitToAgent(server: DockgeServer, endpoint: string, eventName: string, ...args: unknown[]): Promise<Record<string, unknown>> {
+    // If first arg after eventName is a number, treat it as custom timeout
+    let timeoutMs = 30000;
+    let socketArgs = args;
+    if (typeof args[0] === "number") {
+        timeoutMs = args[0] as number;
+        socketArgs = args.slice(1);
+    }
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             reject(new Error(`Timeout waiting for response from agent ${endpoint}`));
-        }, 30000);
+        }, timeoutMs);
 
-        server.serverAgentManager.emitToEndpoint(endpoint, eventName, ...args, (result: Record<string, unknown>) => {
+        server.serverAgentManager.emitToEndpoint(endpoint, eventName, ...socketArgs, (result: Record<string, unknown>) => {
             clearTimeout(timeout);
             resolve(result);
         }).catch((e: Error) => {
             clearTimeout(timeout);
             reject(e);
         });
+    });
+}
+
+/**
+ * After a self-update on an agent, wait for it to reconnect, then broadcast
+ * operation_completed so HA (via SSE) knows the update is done.
+ * Runs in the background — does not block the HTTP response.
+ */
+function waitForAgentReconnect(server: DockgeServer, endpoint: string, stackName: string, timeoutMs: number) {
+    server.serverAgentManager.waitForReconnect(endpoint, timeoutMs).then(() => {
+        log.info("api", `Agent ${endpoint} reconnected after self-update of '${stackName}'`);
+        server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", true);
+    }).catch(() => {
+        log.warn("api", `Timed out waiting for agent ${endpoint} to reconnect after self-update of '${stackName}'`);
+        server.sseManager?.broadcastOperationCompleted(stackName, endpoint, "update", true, "Agent reconnection timed out but update was initiated");
     });
 }
 
@@ -404,15 +428,23 @@ export class ApiRouter extends Router {
                     server.sseManager?.broadcastOperationStarted(req.params.name, endpoint, "update");
                     // Proxy to agent
                     try {
-                        const result = await emitToAgent(server, endpoint, "updateStack", req.params.name, pruneAfterUpdate, pruneAllAfterUpdate);
+                        const result = await emitToAgent(server, endpoint, "updateStack", 300000, req.params.name, pruneAfterUpdate, pruneAllAfterUpdate);
                         const durationMs = Date.now() - startTime;
                         const success = !!result.ok;
                         await UpdateHistoryService.recordUpdate(req.params.name, endpoint, "api", success, null, success ? null : (result.msg as string) || null, startedAt, new Date().toISOString(), durationMs);
-                        server.sseManager?.broadcastOperationCompleted(req.params.name, endpoint, "update", success, success ? undefined : (result.msg as string) || "Update failed on agent");
-                        if (success) {
-                            res.json({ ok: true, message: `Stack '${req.params.name}' updated on ${endpoint}`, endpoint });
+
+                        if (result.selfUpdate) {
+                            // Self-update: agent will restart, don't broadcast completion yet.
+                            // Wait for agent to come back online, then broadcast.
+                            res.json({ ok: true, message: `Stack '${req.params.name}' self-update initiated on ${endpoint}, agent restarting`, endpoint, selfUpdate: true });
+                            waitForAgentReconnect(server, endpoint, req.params.name, 120000);
                         } else {
-                            res.status(500).json({ ok: false, error: result.msg || "Update failed on agent" });
+                            server.sseManager?.broadcastOperationCompleted(req.params.name, endpoint, "update", success, success ? undefined : (result.msg as string) || "Update failed on agent");
+                            if (success) {
+                                res.json({ ok: true, message: `Stack '${req.params.name}' updated on ${endpoint}`, endpoint });
+                            } else {
+                                res.status(500).json({ ok: false, error: result.msg || "Update failed on agent" });
+                            }
                         }
                     } catch (e) {
                         const durationMs = Date.now() - startTime;
@@ -675,7 +707,7 @@ export class ApiRouter extends Router {
                 if (endpoint && endpoint !== "") {
                     // For remote agents, proxy via socket.io
                     try {
-                        const result = await emitToAgent(server, endpoint, "checkStackUpdates", req.params.name);
+                        const result = await emitToAgent(server, endpoint, "checkStackUpdates", 300000, req.params.name);
                         server.sseManager?.broadcastOperationCompleted(req.params.name, endpoint, "check-updates", true);
                         res.json({ ok: true, imageUpdatesAvailable: result.imageUpdatesAvailable ?? false, endpoint });
                     } catch (e) {
