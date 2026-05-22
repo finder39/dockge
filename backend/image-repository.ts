@@ -24,7 +24,7 @@ export class ImageRepository {
                 remoteDigest = resRemote.stdout?.toString().trim();
             }
 
-            imageInfo = new ImageInfo(remoteDigest, imageInfo.localDigest, imageInfo.localId);
+            imageInfo = new ImageInfo(remoteDigest, imageInfo.localDigest, imageInfo.localId, imageInfo.imageVersion);
             this.updateInfo(stack, service, image, imageInfo);
         }
 
@@ -40,10 +40,12 @@ export class ImageRepository {
 
         let localId = "";
         let localDigest = "";
+        let imageVersion: string | null = null;
         if (resLocal.stdout) {
             const localInspect = JSON.parse(resLocal.stdout!.toString());
             if (Array.isArray(localInspect) && localInspect[0]) {
                 localId = localInspect[0].Id;
+                imageVersion = localInspect[0].Config?.Labels?.["org.opencontainers.image.version"] ?? null;
 
                 const localRepoDigest = localInspect[0].RepoDigests;
                 if (Array.isArray(localRepoDigest)) {
@@ -62,14 +64,14 @@ export class ImageRepository {
             log.warn("updateLocal", "Image '" + image + "': Local id '" + localId + "' digest '" + localDigest + "'");
         }
 
-        imageInfo = new ImageInfo(imageInfo.remoteDigest, localDigest, localId);
+        imageInfo = new ImageInfo(imageInfo.remoteDigest, localDigest, localId, imageVersion);
         this.updateInfo(stack, service, image, imageInfo);
 
         return imageInfo;
     }
 
     getImageInfo(stack: string, service: string, image: string) : ImageInfo {
-        return this.imageInfos.get(stack)?.get(this.imageKey(service, image)) ?? new ImageInfo("", "", "");
+        return this.imageInfos.get(stack)?.get(this.imageKey(service, image)) ?? new ImageInfo("", "", "", null);
     }
 
     private updateInfo(stack: string, service: string, image: string, imageInfo: ImageInfo) {
@@ -89,7 +91,8 @@ export class ImageInfo {
     constructor(
         public readonly remoteDigest: string,
         public readonly localDigest: string,
-        public readonly localId: string
+        public readonly localId: string,
+        public readonly imageVersion: string | null
     ) {}
 
     isImageUpdateAvailable() {

@@ -259,7 +259,7 @@ export class ApiRouter extends Router {
         // GET /api/stacks — list stacks from all agents (local + remote)
         router.get("/api/stacks", async (_req: Request, res: Response) => {
             try {
-                type ServiceInfo = { name: string; containerName: string; image: string; state: string; status: string; health: string; imageUpdateAvailable: boolean };
+                type ServiceInfo = { name: string; containerName: string; image: string; state: string; status: string; health: string; imageUpdateAvailable: boolean; imageVersion?: string | null };
                 type StackInfo = { name: string; status: string; statusCode: number; isManagedByDockge: boolean; endpoint: string; autoUpdate: boolean; imageUpdatesAvailable: boolean; services: Record<string, ServiceInfo> };
                 const stacks: StackInfo[] = [];
 

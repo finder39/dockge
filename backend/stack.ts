@@ -438,7 +438,8 @@ export class Stack {
                             health: serviceInfo.Health,
                             recreateNecessary: recreateNecessary,
                             imageUpdateAvailable: serviceImageUpdateAvailable,
-                            remoteImageDigest: imageInfo.remoteDigest
+                            remoteImageDigest: imageInfo.remoteDigest,
+                            imageVersion: imageInfo.imageVersion,
                         }
                     );
 
